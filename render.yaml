@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: roblox-build-modmail
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: DISCORD_BOT_TOKEN
+        sync: false
+      - key: DISCORD_CLIENT_ID
+        sync: false
+      - key: DISCORD_CLIENT_SECRET
+        sync: false
+      - key: DISCORD_REDIRECT_URI
+        sync: false
+      - key: ADMIN_DISCORD_IDS
+        sync: false
+      - key: MONGODB_URI
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: PUBLIC_URL
+        sync: false
+      - key: NODE_ENV
+        value: production

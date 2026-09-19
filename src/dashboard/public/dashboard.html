@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dashboard Modmail</title>
+<link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+<div class="app">
+
+  <aside class="sidebar">
+    <div class="brand">Build Services<small>Dashboard Modmail</small></div>
+    <nav id="nav">
+      <div class="nav-item active" data-view="settings">⚙️&nbsp;&nbsp;Paramètres</div>
+      <div class="nav-item" data-view="categories">📁&nbsp;&nbsp;Catégories</div>
+      <div class="nav-item" data-view="canned">💬&nbsp;&nbsp;Réponses prédéfinies</div>
+      <div class="nav-item" data-view="blacklist">🚫&nbsp;&nbsp;Blacklist</div>
+      <div class="nav-item" data-view="tickets">🎫&nbsp;&nbsp;Tickets</div>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="user-row"><img id="userAvatar" alt="" /><span id="userName">—</span></div>
+      <button id="logoutBtn" class="small" style="width:100%">Se déconnecter</button>
+    </div>
+  </aside>
+
+  <main class="main">
+
+    <!-- ───────────── Paramètres ───────────── -->
+    <section id="view-settings" class="view active">
+      <div class="section-header">
+        <h1>Paramètres</h1>
+        <p>Serveur Discord actif, accès au dashboard, image de marque et anti-spam.</p>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Serveur Discord <span class="tag" id="guildStatusTag">—</span></div>
+        <div class="field">
+          <label>Serveur actif</label>
+          <select id="guildSelect"></select>
+          <div class="hint">Le bot doit d'abord être invité sur le serveur pour qu'il apparaisse ici. Pour migrer d'un serveur de test vers le serveur final, choisis-le simplement dans cette liste puis réinitialise.</div>
+        </div>
+        <div style="display:flex; gap:10px; margin-top:14px;">
+          <button id="saveGuildBtn">Enregistrer le serveur</button>
+          <button id="initGuildBtn" class="primary">Initialiser sur ce serveur</button>
+          <a id="inviteBotLink" class="btn" href="#" target="_blank" style="text-decoration:none; display:inline-flex; align-items:center;">Inviter le bot</a>
+        </div>
+        <div class="hint" id="guildInitHint" style="margin-top:12px;"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Accès au dashboard</div>
+        <div id="adminList"></div>
+        <div class="field-row" style="margin-top:10px;">
+          <input id="newAdminId" placeholder="ID Discord (ex: 123456789012345678)" class="mono" />
+          <button id="addAdminBtn" style="flex:0 0 auto;">Ajouter</button>
+        </div>
+        <div class="hint">Ces personnes pourront se connecter au dashboard avec leur compte Discord.</div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Image de marque</div>
+        <div class="field"><label>Nom affiché</label><input id="brandName" /></div>
+        <div class="field"><label>URL du logo (optionnel)</label><input id="brandLogo" /></div>
+        <div class="field"><label>Texte de pied de page (optionnel)</label><input id="brandFooter" /></div>
+        <button id="saveBrandBtn" class="primary">Enregistrer</button>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Anti-spam</div>
+        <div class="field-row">
+          <div class="field"><label>Tentatives max</label><input id="spamMax" type="number" min="1" /></div>
+          <div class="field"><label>Fenêtre (minutes)</label><input id="spamWindow" type="number" min="1" /></div>
+        </div>
+        <button id="saveSpamBtn" class="primary">Enregistrer</button>
+      </div>
+    </section>
+
+    <!-- ───────────── Catégories ───────────── -->
+    <section id="view-categories" class="view">
+      <div class="section-header">
+        <h1>Catégories</h1>
+        <p>Chaque catégorie a ses propres questions, son rôle staff, son format de nom de salon et sa fermeture automatique.</p>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Nouvelle catégorie</div>
+        <div class="field-row">
+          <div class="field"><label>Emoji</label><input id="newCatEmoji" value="📁" /></div>
+          <div class="field" style="flex:3"><label>Nom</label><input id="newCatName" placeholder="Ex : Support" /></div>
+        </div>
+        <button id="addCategoryBtn" class="primary">Créer la catégorie</button>
+      </div>
+
+      <div id="categoriesList"></div>
+    </section>
+
+    <!-- ───────────── Réponses prédéfinies ───────────── -->
+    <section id="view-canned" class="view">
+      <div class="section-header">
+        <h1>Réponses prédéfinies</h1>
+        <p>Accessibles dans un salon de ticket via la commande <code>/canned</code>.</p>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Nouvelle réponse</div>
+        <div class="field"><label>Libellé (affiché dans le menu)</label><input id="newCannedLabel" placeholder="Ex : Demande de délai" /></div>
+        <div class="field"><label>Catégorie</label><select id="newCannedCategory"></select></div>
+        <div class="field"><label>Contenu</label><textarea id="newCannedContent" rows="3" placeholder="Rédigé en français, traduit automatiquement si besoin."></textarea></div>
+        <button id="addCannedBtn" class="primary">Créer</button>
+      </div>
+
+      <div id="cannedList"></div>
+    </section>
+
+    <!-- ───────────── Blacklist ───────────── -->
+    <section id="view-blacklist" class="view">
+      <div class="section-header">
+        <h1>Blacklist</h1>
+        <p>Les utilisateurs listés ici ne peuvent plus ouvrir de ticket.</p>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Ajouter un utilisateur</div>
+        <div class="field-row">
+          <div class="field"><label>ID Discord</label><input id="newBlUserId" class="mono" placeholder="123456789012345678" /></div>
+          <div class="field"><label>Pseudo (optionnel)</label><input id="newBlUsername" /></div>
+        </div>
+        <div class="field"><label>Raison (optionnel)</label><input id="newBlReason" /></div>
+        <button id="addBlacklistBtn" class="primary">Ajouter à la blacklist</button>
+      </div>
+
+      <div id="blacklistList"></div>
+    </section>
+
+    <!-- ───────────── Tickets ───────────── -->
+    <section id="view-tickets" class="view">
+      <div class="section-header">
+        <h1>Tickets</h1>
+        <p>Vue en lecture seule des tickets ouverts et fermés récents.</p>
+      </div>
+
+      <div style="display:flex; gap:8px; margin-bottom:16px;">
+        <button id="ticketsOpenBtn" class="primary small">Ouverts</button>
+        <button id="ticketsClosedBtn" class="small">Fermés</button>
+      </div>
+
+      <div id="ticketsList"></div>
+    </section>
+
+  </main>
+</div>
+
+<div id="toast" class="toast"></div>
+<script src="/js/dashboard.js"></script>
+</body>
+</html>

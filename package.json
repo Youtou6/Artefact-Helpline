@@ -1,0 +1,23 @@
+{
+  "name": "roblox-build-modmail",
+  "version": "1.0.0",
+  "description": "Bot Discord modmail multilingue (EN/FR/DE) avec dashboard d'administration, pour un serveur de vente de services de build Roblox.",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18.17.0"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "@vitalets/google-translate-api": "^9.2.0",
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "express-session": "^1.18.1",
+    "mongoose": "^8.7.2",
+    "connect-mongo": "^5.1.0"
+  }
+}
