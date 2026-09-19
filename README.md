@@ -120,7 +120,16 @@ Quand tu es prêt : invite le bot sur ton vrai serveur, va dans **Paramètres**,
 
 ---
 
-## Notes techniques
+## Nouveautés : contexte utilisateur, notation, inactivité en 2 temps, redirection, questions avancées
+
+- **Contexte utilisateur** : l'utilisateur reçoit désormais un DM à chaque étape clé (ticket créé avec son numéro et sa catégorie, prise en charge par un staff, redirection vers une autre catégorie, rappel d'inactivité, fermeture — avec la raison).
+- **Transcript** : un vrai fichier `.txt` lisible (horodatage, auteur, contenu, pièces jointes) est posté dans le salon de logs à chaque fermeture.
+- **Notation** : juste après la fermeture, l'utilisateur reçoit un DM avec 5 boutons ⭐ pour noter le support. La note apparaît dans le dashboard (onglet Tickets) et dans le salon de logs.
+- **Inactivité en 2 temps** (configurable par catégorie, dans le dashboard) : après *X* minutes sans activité, un rappel est envoyé à l'utilisateur et noté dans le salon ; si toujours rien après encore *Y* minutes, le ticket se ferme automatiquement. Un bouton **"Forcer le rappel d'inactivité"** sur le panneau du ticket permet de déclencher ce rappel manuellement, à tout moment.
+- **Redirection de ticket** : bouton **"Rediriger"** sur le panneau du ticket → menu déroulant des autres catégories actives. Le salon est renommé, les permissions du rôle staff mises à jour, et l'utilisateur prévenu.
+- **Questions avancées** : dans l'éditeur de catégorie, chaque question a désormais un type — *Texte libre*, *Menu déroulant* (avec ses options séparées par des virgules) ou *Fichier requis* (le bot exige une pièce jointe avant de continuer).
+
+
 
 - **Traduction** : librairie gratuite sans clé API (`@vitalets/google-translate-api`). Aucune traduction n'est faite entre l'anglais et le français (le staff gère directement), uniquement DE ⇄ FR.
 - **Un seul ticket ouvert à la fois** par utilisateur.

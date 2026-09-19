@@ -184,6 +184,27 @@ function roleOptions(roles, selected) {
   ).join('');
 }
 
+const QUESTION_TYPE_LABELS = { text: 'Texte libre', select: 'Menu déroulant', file: 'Fichier requis' };
+
+function questionRowHTML(q) {
+  const type = q.type || 'text';
+  const optionsValue = (q.options || []).join(', ');
+  return `
+    <div class="question-item" data-qid="${q.id || ''}">
+      <select data-role="qtype" style="flex:0 0 150px;">
+        ${Object.entries(QUESTION_TYPE_LABELS).map(([val, label]) =>
+          `<option value="${val}" ${type === val ? 'selected' : ''}>${label}</option>`
+        ).join('')}
+      </select>
+      <div style="flex:1; display:flex; flex-direction:column; gap:6px;">
+        <input data-role="qtext" value="${escapeHtml(q.text || '')}" placeholder="Texte de la question..." />
+        <input data-role="qoptions" value="${escapeHtml(optionsValue)}" placeholder="Options séparées par des virgules"
+          style="${type === 'select' ? '' : 'display:none'}" />
+      </div>
+      <button class="small danger" data-remove-question style="flex:0 0 auto;">✕</button>
+    </div>`;
+}
+
 function renderCategories(roles) {
   const el = document.getElementById('categoriesList');
   if (currentCategories.length === 0) {
@@ -217,25 +238,27 @@ function renderCategories(roles) {
       </div>
       <div class="hint" style="margin-top:-8px; margin-bottom:14px;">Variables : <code>{key}</code> <code>{user}</code> <code>{count}</code></div>
 
+      <div class="checkbox-row field">
+        <input type="checkbox" data-field="anonymousReplies" ${cat.anonymousReplies ? 'checked' : ''} />
+        <label style="margin:0;">Réponses staff anonymes</label>
+      </div>
+
       <div class="field-row">
-        <div class="checkbox-row field">
-          <input type="checkbox" data-field="anonymousReplies" ${cat.anonymousReplies ? 'checked' : ''} />
-          <label style="margin:0;">Réponses staff anonymes</label>
+        <div class="field">
+          <label>Rappel d'inactivité après (minutes, 0 = désactivé)</label>
+          <input type="number" min="0" data-field="inactivityWarningMinutes" value="${cat.inactivityWarningMinutes ?? 0}" />
         </div>
         <div class="field">
-          <label>Fermeture auto après (minutes, 0 = désactivé)</label>
-          <input type="number" min="0" data-field="autoCloseMinutes" value="${cat.autoCloseMinutes}" />
+          <label>Puis fermeture après (minutes suivant le rappel, 0 = désactivé)</label>
+          <input type="number" min="0" data-field="inactivityCloseMinutes" value="${cat.inactivityCloseMinutes ?? 0}" />
         </div>
       </div>
+      <div class="hint" style="margin-top:-8px; margin-bottom:14px;">Ex : 1440 puis 720 = rappel après 24h d'inactivité, fermeture 12h plus tard si toujours rien.</div>
 
       <hr class="divider" />
       <label>Questions posées avant création du ticket</label>
       <div class="questions-list">
-        ${cat.questions.map((q) => `
-          <div class="question-item" data-qid="${q.id}">
-            <input value="${escapeHtml(q.text)}" />
-            <button class="small danger" data-remove-question>✕</button>
-          </div>`).join('')}
+        ${cat.questions.map((q) => questionRowHTML(q)).join('')}
       </div>
       <button class="small" data-add-question style="margin-bottom:16px;">+ Ajouter une question</button>
 
@@ -257,6 +280,13 @@ document.getElementById('addCategoryBtn').addEventListener('click', async () => 
   loadCategories();
 });
 
+document.getElementById('categoriesList').addEventListener('change', (e) => {
+  if (!e.target.matches('[data-role="qtype"]')) return;
+  const row = e.target.closest('.question-item');
+  const optionsInput = row.querySelector('[data-role="qoptions"]');
+  optionsInput.style.display = e.target.value === 'select' ? '' : 'none';
+});
+
 document.getElementById('categoriesList').addEventListener('click', async (e) => {
   const panel = e.target.closest('[data-cat-id]');
   if (!panel) return;
@@ -264,11 +294,11 @@ document.getElementById('categoriesList').addEventListener('click', async (e) =>
 
   if (e.target.matches('[data-add-question]')) {
     const list = panel.querySelector('.questions-list');
-    const row = document.createElement('div');
-    row.className = 'question-item';
-    row.innerHTML = '<input value="" placeholder="Nouvelle question..." /><button class="small danger" data-remove-question>✕</button>';
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = questionRowHTML({ id: '', type: 'text', text: '', options: [] });
+    const row = wrapper.firstElementChild;
     list.appendChild(row);
-    row.querySelector('input').focus();
+    row.querySelector('[data-role="qtext"]').focus();
     return;
   }
 
@@ -287,10 +317,13 @@ document.getElementById('categoriesList').addEventListener('click', async (e) =>
 
   if (e.target.matches('[data-save-category]')) {
     const get = (field) => panel.querySelector(`[data-field="${field}"]`);
-    const questions = [...panel.querySelectorAll('.question-item')].map((row) => ({
-      id: row.dataset.qid || undefined,
-      text: row.querySelector('input').value.trim(),
-    })).filter((q) => q.text);
+    const questions = [...panel.querySelectorAll('.question-item')].map((row) => {
+      const type = row.querySelector('[data-role="qtype"]').value;
+      const text = row.querySelector('[data-role="qtext"]').value.trim();
+      const options = row.querySelector('[data-role="qoptions"]').value
+        .split(',').map((s) => s.trim()).filter(Boolean);
+      return { id: row.dataset.qid || undefined, type, text, options };
+    }).filter((q) => q.text);
 
     const body = {
       name: get('name').value.trim(),
@@ -298,7 +331,8 @@ document.getElementById('categoriesList').addEventListener('click', async (e) =>
       staffRoleId: get('staffRoleId').value || null,
       ticketNameFormat: get('ticketNameFormat').value.trim() || '{key}-{count}',
       anonymousReplies: get('anonymousReplies').checked,
-      autoCloseMinutes: Number(get('autoCloseMinutes').value) || 0,
+      inactivityWarningMinutes: Number(get('inactivityWarningMinutes').value) || 0,
+      inactivityCloseMinutes: Number(get('inactivityCloseMinutes').value) || 0,
       active: get('active').checked,
       questions,
     };
@@ -439,11 +473,15 @@ async function loadTickets(status) {
   const guildId = currentSettings?.guildId;
   el.innerHTML = '<div class="panel">' + tickets.map((t) => {
     const link = guildId ? `https://discord.com/channels/${guildId}/${t.channelId}` : null;
+    const ratingBadge = t.rating ? `<span class="badge ok">${'⭐'.repeat(t.rating)}</span>` : (status === 'closed' ? '<span class="badge">Pas de note</span>' : '');
+    const sub = status === 'closed'
+      ? `${t.language.toUpperCase()} · fermé ${fmtDate(t.closedAt)} · ${t.closeReason === 'inactivity' ? 'inactivité' : 'staff'}`
+      : `${t.language.toUpperCase()} · ${fmtDate(t.createdAt)} · ${t.claimedByTag ? 'Pris en charge par ' + escapeHtml(t.claimedByTag) : 'Non pris en charge'}`;
     return `
     <div class="list-row">
       <div class="row-main">
-        <div class="row-title">#${t.ticketNumber} — ${escapeHtml(t.categoryId?.emoji || '')} ${escapeHtml(t.categoryId?.name || t.categoryKey)} — ${escapeHtml(t.username)}</div>
-        <div class="row-sub">${t.language.toUpperCase()} · ${fmtDate(t.createdAt)} · ${t.claimedByTag ? 'Pris en charge par ' + escapeHtml(t.claimedByTag) : 'Non pris en charge'}</div>
+        <div class="row-title">#${t.ticketNumber} — ${escapeHtml(t.categoryId?.emoji || '')} ${escapeHtml(t.categoryId?.name || t.categoryKey)} — ${escapeHtml(t.username)} ${ratingBadge}</div>
+        <div class="row-sub">${sub}</div>
       </div>
       <div class="row-actions">${link ? `<a class="btn small" href="${link}" target="_blank">Voir le salon</a>` : ''}</div>
     </div>`;

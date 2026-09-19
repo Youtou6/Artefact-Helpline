@@ -92,7 +92,7 @@ router.get('/categories', async (req, res) => {
 
 router.post('/categories', async (req, res) => {
   try {
-    const { name, emoji, staffRoleId, ticketNameFormat, anonymousReplies, autoCloseMinutes, order } = req.body;
+    const { name, emoji, staffRoleId, ticketNameFormat, anonymousReplies, inactivityWarningMinutes, inactivityCloseMinutes, order } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: 'name_required' });
 
     let key = slugify(name);
@@ -110,7 +110,8 @@ router.post('/categories', async (req, res) => {
       staffRoleId: staffRoleId || null,
       ticketNameFormat: ticketNameFormat || '{key}-{count}',
       anonymousReplies: !!anonymousReplies,
-      autoCloseMinutes: Number(autoCloseMinutes) || 0,
+      inactivityWarningMinutes: Number(inactivityWarningMinutes) || 0,
+      inactivityCloseMinutes: Number(inactivityCloseMinutes) || 0,
       order: Number(order) || 0,
       questions: [],
     });
@@ -122,16 +123,18 @@ router.post('/categories', async (req, res) => {
 
 router.put('/categories/:id', async (req, res) => {
   try {
-    const allowed = ['name', 'emoji', 'staffRoleId', 'ticketNameFormat', 'anonymousReplies', 'autoCloseMinutes', 'order', 'active', 'questions'];
+    const allowed = ['name', 'emoji', 'staffRoleId', 'ticketNameFormat', 'anonymousReplies', 'inactivityWarningMinutes', 'inactivityCloseMinutes', 'order', 'active', 'questions'];
     const update = {};
     for (const key of allowed) {
       if (req.body[key] !== undefined) update[key] = req.body[key];
     }
     if (update.questions) {
-      // Assigne un id stable à toute nouvelle question qui n'en a pas encore.
+      // Assigne un id stable à toute nouvelle question qui n'en a pas encore, et nettoie le type/options.
       update.questions = update.questions.map((q, i) => ({
         id: q.id || `q_${Date.now()}_${i}`,
+        type: ['text', 'select', 'file'].includes(q.type) ? q.type : 'text',
         text: q.text,
+        options: q.type === 'select' ? (Array.isArray(q.options) ? q.options.filter(Boolean) : []) : [],
       }));
     }
     const category = await Category.findByIdAndUpdate(req.params.id, update, { new: true });

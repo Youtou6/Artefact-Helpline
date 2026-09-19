@@ -219,7 +219,7 @@ label { font-size: 12.5px; color: var(--text-soft); display: block; margin-botto
 .toast.show { opacity: 1; transform: translateY(0); }
 
 .questions-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
-.question-item { display: flex; gap: 8px; align-items: center; }
+.question-item { display: flex; gap: 8px; align-items: flex-start; padding: 8px; border: 1px solid var(--line-soft); border-radius: var(--radius); }
 .question-item input { flex: 1; }
 
 @media (max-width: 780px) {

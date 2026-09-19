@@ -2,8 +2,15 @@ const { mongoose } = require('../config/db');
 const { Schema } = mongoose;
 
 const QuestionSchema = new Schema({
-  id: { type: String, required: true }, // ex: "q1", généré côté serveur
-  text: { type: String, required: true }, // rédigée en français (langue source), traduite à la volée
+  id: { type: String, required: true }, // généré côté serveur
+
+  // "text"   = réponse libre en DM
+  // "select" = l'utilisateur choisit parmi des options (menu déroulant)
+  // "file"   = l'utilisateur doit envoyer une pièce jointe
+  type: { type: String, enum: ['text', 'select', 'file'], default: 'text' },
+
+  text: { type: String, required: true }, // français, source pour traduction
+  options: { type: [String], default: [] }, // uniquement pour type "select", français
 }, { _id: false });
 
 const CategorySchema = new Schema({
@@ -23,8 +30,11 @@ const CategorySchema = new Schema({
 
   anonymousReplies: { type: Boolean, default: false },
 
-  // 0 = pas de fermeture automatique
-  autoCloseMinutes: { type: Number, default: 0 },
+  // Inactivité en 2 temps. 0 = étape désactivée.
+  // 1) après `inactivityWarningMinutes` sans activité -> rappel envoyé à l'utilisateur + note en salon
+  // 2) après encore `inactivityCloseMinutes` sans nouvelle activité depuis ce rappel -> fermeture auto
+  inactivityWarningMinutes: { type: Number, default: 0 },
+  inactivityCloseMinutes: { type: Number, default: 0 },
 
   questions: { type: [QuestionSchema], default: [] },
 }, { timestamps: true });

@@ -82,20 +82,40 @@ function buildCategorySelectMessage(categories, lang, translatedNames) {
 }
 
 // ─── Question de collecte (une par une) ────────────────────────────────────
-function buildQuestionMessage(questionText, stepLabel) {
-  const container = buildTextContainer([`**${stepLabel}**`, questionText]);
+const FILE_HINT = {
+  en: '📎 Please attach a file to your reply to answer this question.',
+  fr: '📎 Merci de joindre un fichier à ta réponse pour répondre à cette question.',
+  de: '📎 Bitte fügen Sie Ihrer Antwort eine Datei bei, um diese Frage zu beantworten.',
+};
+const SELECT_PLACEHOLDER = { en: 'Choose an option', fr: 'Choisir une option', de: 'Option auswählen' };
+
+/** question = { text, type, options } déjà traduits dans la langue de l'utilisateur */
+function buildQuestionMessage({ text, stepLabel, lang, type = 'text', options = [] }) {
+  const lines = [`**${stepLabel}**`, text];
+  if (type === 'file') lines.push(FILE_HINT[lang] || FILE_HINT.en);
+
+  const container = buildTextContainer(lines);
+
+  if (type === 'select' && options.length) {
+    const select = new StringSelectMenuBuilder()
+      .setCustomId('question:select')
+      .setPlaceholder(SELECT_PLACEHOLDER[lang] || SELECT_PLACEHOLDER.en)
+      .addOptions(options.map((opt, i) => ({ label: opt.slice(0, 100), value: String(i) })));
+    withActionRow(container, new ActionRowBuilder().addComponents(select));
+  }
+
   return { components: [container], flags: CV2_FLAGS };
 }
 
 // ─── Confirmation de création de ticket (en DM) ────────────────────────────
 const TICKET_CREATED_TEXT = {
-  en: (n) => `Your ticket **#${n}** has been created. Our team will reply here shortly.`,
-  fr: (n) => `Votre ticket **#${n}** a été créé. Notre équipe vous répondra ici sous peu.`,
-  de: (n) => `Ihr Ticket **#${n}** wurde erstellt. Unser Team wird hier in Kürze antworten.`,
+  en: (n, cat) => `✅ Your ticket **#${n}** (${cat}) has been created. Our team has been notified and will reply here shortly. You'll be kept updated in this DM as things happen (claimed, moved, closed...).`,
+  fr: (n, cat) => `✅ Votre ticket **#${n}** (${cat}) a été créé. Notre équipe a été notifiée et vous répondra ici sous peu. Vous serez tenu(e) informé(e) dans ce DM à chaque étape (prise en charge, changement de catégorie, fermeture...).`,
+  de: (n, cat) => `✅ Ihr Ticket **#${n}** (${cat}) wurde erstellt. Unser Team wurde benachrichtigt und wird hier in Kürze antworten. Sie werden in diesem DM über jeden Schritt informiert (Übernahme, Verschiebung, Schließung...).`,
 };
 
-function buildTicketCreatedMessage(lang, ticketNumber) {
-  const text = (TICKET_CREATED_TEXT[lang] || TICKET_CREATED_TEXT.en)(ticketNumber);
+function buildTicketCreatedMessage(lang, ticketNumber, categoryName) {
+  const text = (TICKET_CREATED_TEXT[lang] || TICKET_CREATED_TEXT.en)(ticketNumber, categoryName);
   return { components: [buildTextContainer([text])], flags: CV2_FLAGS };
 }
 
@@ -121,10 +141,14 @@ function buildTicketPanel({ ticket, category, user, claimedTag, closed, pingRole
 
   lines.push(claimedTag ? `🟡 Pris en charge par **${claimedTag}**` : '⚪ Non pris en charge');
 
+  if (!closed && ticket.inactivityWarnedAt) {
+    lines.push(`🔔 Rappel d'inactivité envoyé <t:${Math.floor(new Date(ticket.inactivityWarnedAt).getTime() / 1000)}:R>`);
+  }
+
   const container = buildTextContainer(lines, { withSeparators: true });
 
   if (!closed) {
-    const row = new ActionRowBuilder().addComponents(
+    const row1 = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(`ticket:claim:${ticket._id}`)
         .setLabel('Prendre en charge')
@@ -137,10 +161,120 @@ function buildTicketPanel({ ticket, category, user, claimedTag, closed, pingRole
         .setStyle(ButtonStyle.Danger)
         .setEmoji('🔒')
     );
-    withActionRow(container, row);
+    const row2 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`ticket:redirect:${ticket._id}`)
+        .setLabel('Rediriger')
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji('🔀'),
+      new ButtonBuilder()
+        .setCustomId(`ticket:remind:${ticket._id}`)
+        .setLabel('Forcer le rappel d\'inactivité')
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji('⏰')
+    );
+    withActionRow(container, row1);
+    withActionRow(container, row2);
   }
 
   return { components: [container], flags: CV2_FLAGS };
+}
+
+// ─── Menu de redirection vers une autre catégorie (ephemeral, côté staff) ──
+function buildCategoryRedirectSelect(categories, ticketId) {
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`redirect:select:${ticketId}`)
+    .setPlaceholder('Choisir la nouvelle catégorie')
+    .addOptions(categories.map((c) => ({
+      label: c.name.slice(0, 100),
+      value: c._id.toString(),
+      emoji: c.emoji || undefined,
+    })));
+  return { content: 'Rediriger ce ticket vers :', components: [new ActionRowBuilder().addComponents(select)], ephemeral: true };
+}
+
+// ─── Notifications DM (texte simple) ───────────────────────────────────────
+const CLAIM_NOTIFY_TEXT = {
+  en: (tag) => `🙋 Your ticket has been picked up by **${tag}**. They'll be assisting you from now on.`,
+  fr: (tag) => `🙋 Votre ticket a été pris en charge par **${tag}**. Cette personne va vous accompagner à partir de maintenant.`,
+  de: (tag) => `🙋 Ihr Ticket wurde von **${tag}** übernommen. Diese Person wird Sie ab jetzt betreuen.`,
+};
+const CLAIM_NOTIFY_TEXT_ANON = {
+  en: '🙋 Your ticket has been picked up by our team. Someone will be assisting you from now on.',
+  fr: '🙋 Votre ticket a été pris en charge par notre équipe. Une personne va vous accompagner à partir de maintenant.',
+  de: '🙋 Ihr Ticket wurde von unserem Team übernommen. Jemand wird Sie ab jetzt betreuen.',
+};
+
+function buildClaimNotifyText(lang, staffTag, anonymous) {
+  if (anonymous) return CLAIM_NOTIFY_TEXT_ANON[lang] || CLAIM_NOTIFY_TEXT_ANON.en;
+  return (CLAIM_NOTIFY_TEXT[lang] || CLAIM_NOTIFY_TEXT.en)(staffTag);
+}
+
+const REDIRECT_NOTIFY_TEXT = {
+  en: (cat) => `🔀 Your ticket has been moved to a different category: **${cat}**. A staff member from that team will take it from here.`,
+  fr: (cat) => `🔀 Votre ticket a été redirigé vers une autre catégorie : **${cat}**. Un membre de cette équipe va prendre le relais.`,
+  de: (cat) => `🔀 Ihr Ticket wurde in eine andere Kategorie verschoben: **${cat}**. Ein Mitarbeiter dieses Teams wird sich nun darum kümmern.`,
+};
+function buildRedirectNotifyText(lang, newCategoryName) {
+  return (REDIRECT_NOTIFY_TEXT[lang] || REDIRECT_NOTIFY_TEXT.en)(newCategoryName);
+}
+
+const INACTIVITY_REMINDER_TEXT = {
+  en: 'We haven\'t heard from you in a while 👋 Is there anything else we can help you with? This ticket will be closed automatically if there\'s no reply.',
+  fr: 'Nous n\'avons plus de nouvelles depuis un moment 👋 Avez-vous encore besoin d\'aide ? Ce ticket sera fermé automatiquement en l\'absence de réponse.',
+  de: 'Wir haben schon länger nichts mehr von Ihnen gehört 👋 Benötigen Sie noch Hilfe? Dieses Ticket wird automatisch geschlossen, wenn keine Antwort erfolgt.',
+};
+function buildInactivityReminderText(lang) {
+  return INACTIVITY_REMINDER_TEXT[lang] || INACTIVITY_REMINDER_TEXT.en;
+}
+
+const CLOSE_TEXT = {
+  en: {
+    staff: 'This ticket has been closed. Feel free to DM us again if you need anything else.',
+    inactivity: 'This ticket has been closed automatically due to inactivity. Feel free to DM us again anytime.',
+  },
+  fr: {
+    staff: 'Ce ticket a été fermé. N\'hésitez pas à nous recontacter en DM si besoin.',
+    inactivity: 'Ce ticket a été fermé automatiquement en raison de l\'inactivité. N\'hésitez pas à nous recontacter en DM quand vous voulez.',
+  },
+  de: {
+    staff: 'Dieses Ticket wurde geschlossen. Kontaktieren Sie uns gerne erneut per DM, falls Sie weitere Hilfe benötigen.',
+    inactivity: 'Dieses Ticket wurde automatisch wegen Inaktivität geschlossen. Kontaktieren Sie uns gerne jederzeit erneut per DM.',
+  },
+};
+function buildCloseText(lang, reason = 'staff') {
+  const dict = CLOSE_TEXT[lang] || CLOSE_TEXT.en;
+  return dict[reason] || dict.staff;
+}
+
+// ─── Notation post-ticket ───────────────────────────────────────────────────
+const RATING_PROMPT_TEXT = {
+  en: 'Before you go — how would you rate the support you received?',
+  fr: 'Avant de vous quitter — comment évalueriez-vous le support reçu ?',
+  de: 'Bevor Sie gehen — wie würden Sie den erhaltenen Support bewerten?',
+};
+
+function buildRatingRequestMessage(lang, ticketId) {
+  const container = buildTextContainer([RATING_PROMPT_TEXT[lang] || RATING_PROMPT_TEXT.en]);
+  const row = new ActionRowBuilder().addComponents(
+    [1, 2, 3, 4, 5].map((n) =>
+      new ButtonBuilder()
+        .setCustomId(`rating:${n}:${ticketId}`)
+        .setLabel('⭐'.repeat(n))
+        .setStyle(ButtonStyle.Secondary)
+    )
+  );
+  withActionRow(container, row);
+  return { components: [container], flags: CV2_FLAGS };
+}
+
+const RATING_THANKS_TEXT = {
+  en: (n) => `Thanks for your feedback! You rated us ${'⭐'.repeat(n)}.`,
+  fr: (n) => `Merci pour votre retour ! Vous nous avez noté ${'⭐'.repeat(n)}.`,
+  de: (n) => `Danke für Ihr Feedback! Sie haben uns mit ${'⭐'.repeat(n)} bewertet.`,
+};
+function buildRatingThanksText(lang, rating) {
+  return (RATING_THANKS_TEXT[lang] || RATING_THANKS_TEXT.en)(rating);
 }
 
 module.exports = {
@@ -151,4 +285,11 @@ module.exports = {
   buildQuestionMessage,
   buildTicketCreatedMessage,
   buildTicketPanel,
+  buildCategoryRedirectSelect,
+  buildClaimNotifyText,
+  buildRedirectNotifyText,
+  buildInactivityReminderText,
+  buildCloseText,
+  buildRatingRequestMessage,
+  buildRatingThanksText,
 };

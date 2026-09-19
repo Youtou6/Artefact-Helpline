@@ -22,6 +22,18 @@ const REMINDER_TEXT = {
   de: 'Bitte verwenden Sie das Menü oben, um eine Kategorie auszuwählen.',
 };
 
+const SELECT_REQUIRED_TEXT = {
+  en: 'Please use the menu above to answer this question.',
+  fr: 'Merci d\'utiliser le menu ci-dessus pour répondre à cette question.',
+  de: 'Bitte verwenden Sie das Menü oben, um diese Frage zu beantworten.',
+};
+
+const FILE_REQUIRED_TEXT = {
+  en: '📎 Please attach a file to answer this question.',
+  fr: '📎 Merci de joindre un fichier pour répondre à cette question.',
+  de: '📎 Bitte fügen Sie eine Datei bei, um diese Frage zu beantworten.',
+};
+
 const BLACKLIST_TEXT =
   'You are not allowed to open a ticket. / Vous n\'êtes pas autorisé(e) à ouvrir un ticket. / ' +
   'Sie dürfen kein Ticket eröffnen.';
@@ -171,8 +183,16 @@ async function sendQuestion(user, flow, interaction = null) {
   const question = flow.questions[flow.index];
   const lang = flow.language;
   const text = lang === 'fr' ? question.text : await translateText(question.text, lang);
+
+  let translatedOptions = [];
+  if (question.type === 'select' && question.options?.length) {
+    translatedOptions = lang === 'fr'
+      ? question.options
+      : await Promise.all(question.options.map((o) => translateText(o, lang)));
+  }
+
   const stepLabel = `${flow.index + 1}/${flow.questions.length}`;
-  const payload = buildQuestionMessage(text, stepLabel);
+  const payload = buildQuestionMessage({ text, stepLabel, lang, type: question.type, options: translatedOptions });
 
   if (interaction) {
     await interaction.update(payload).catch(() => {});
@@ -182,10 +202,61 @@ async function sendQuestion(user, flow, interaction = null) {
   }
 }
 
+/** Interaction select menu question:select (question de type "select") */
+async function handleQuestionSelect(interaction) {
+  const userId = interaction.user.id;
+  const flow = flowState.getFlow(userId);
+
+  if (!flow || flow.step !== 'questions') {
+    await interaction.reply('This session has expired. Please send a new message to start again.').catch(() => {});
+    return;
+  }
+
+  const question = flow.questions[flow.index];
+  if (!question || question.type !== 'select') {
+    await interaction.reply('This question is no longer active.').catch(() => {});
+    return;
+  }
+
+  const idx = parseInt(interaction.values[0], 10);
+  const canonicalAnswer = question.options[idx] ?? interaction.values[0];
+
+  flow.answers.push({ question: question.text, type: 'select', answer: canonicalAnswer, answerFr: null });
+  flow.index += 1;
+
+  if (flow.index < flow.questions.length) {
+    await sendQuestion(interaction.user, flow, interaction);
+  } else {
+    await finalizeTicket(interaction.user, flow, interaction);
+  }
+}
+
 async function handleQuestionAnswer(message, flow) {
   const question = flow.questions[flow.index];
-  const rawAnswer = message.content?.trim() || '(pas de texte)';
+  const lang = flow.language;
 
+  // Une question "select" ne se répond que via le menu déroulant.
+  if (question.type === 'select') {
+    await message.channel.send(SELECT_REQUIRED_TEXT[lang] || SELECT_REQUIRED_TEXT.en).catch(() => {});
+    return;
+  }
+
+  // Une question "file" exige une pièce jointe.
+  if (question.type === 'file') {
+    const attachmentUrls = [...message.attachments.values()].map((a) => a.url);
+    if (attachmentUrls.length === 0) {
+      await message.channel.send(FILE_REQUIRED_TEXT[lang] || FILE_REQUIRED_TEXT.en).catch(() => {});
+      return;
+    }
+    flow.answers.push({ question: question.text, type: 'file', answer: attachmentUrls.join('\n'), answerFr: null });
+    flow.index += 1;
+    if (flow.index < flow.questions.length) await sendQuestion(message.author, flow);
+    else await finalizeTicket(message.author, flow);
+    return;
+  }
+
+  // type === 'text'
+  const rawAnswer = message.content?.trim() || '(pas de texte)';
   const attachmentUrls = [...message.attachments.values()].map((a) => a.url);
   const answerWithAttachments = attachmentUrls.length
     ? `${rawAnswer}\n${attachmentUrls.join('\n')}`
@@ -196,7 +267,7 @@ async function handleQuestionAnswer(message, flow) {
     answerFr = await translateText(rawAnswer, 'fr');
   }
 
-  flow.answers.push({ question: question.text, answer: answerWithAttachments, answerFr });
+  flow.answers.push({ question: question.text, type: 'text', answer: answerWithAttachments, answerFr });
   flow.index += 1;
 
   if (flow.index < flow.questions.length) {
@@ -263,11 +334,14 @@ async function finalizeTicket(user, flow, interaction = null) {
   });
   await channel.send({ ...panel, allowedMentions: { roles: category.staffRoleId ? [category.staffRoleId] : [] } });
 
-  const confirmPayload = buildTicketCreatedMessage(flow.language, seq);
+  const confirmPayload = buildTicketCreatedMessage(flow.language, seq, category.name);
   if (interaction) await interaction.update(confirmPayload).catch(() => {});
   else await (await user.createDM()).send(confirmPayload).catch(() => {});
 
   flowState.clearFlow(user.id);
 }
 
-module.exports = { handleDirectMessage, handleLanguageSelect, handleCategorySelect };
+module.exports = {
+  handleDirectMessage, handleLanguageSelect, handleCategorySelect, handleQuestionSelect,
+  buildChannelName,
+};

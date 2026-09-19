@@ -2,9 +2,10 @@ const { mongoose } = require('../config/db');
 const { Schema } = mongoose;
 
 const AnswerSchema = new Schema({
-  question: { type: String, required: true }, // texte affiché à l'utilisateur (dans sa langue)
-  answer: { type: String, required: true }, // réponse brute de l'utilisateur (langue d'origine)
-  answerFr: { type: String, default: null }, // traduction FR, uniquement si langue = de
+  question: { type: String, required: true }, // texte de la question (français, source)
+  type: { type: String, enum: ['text', 'select', 'file'], default: 'text' },
+  answer: { type: String, required: true }, // réponse brute (texte, option choisie, ou URLs de fichiers)
+  answerFr: { type: String, default: null }, // traduction FR, uniquement pour les réponses texte en allemand
 }, { _id: false });
 
 const TicketSchema = new Schema({
@@ -28,7 +29,13 @@ const TicketSchema = new Schema({
   claimedByTag: { type: String, default: null },
 
   closedBy: { type: String, default: null },
-  closeReason: { type: String, default: null },
+  closeReason: { type: String, default: null }, // 'staff' | 'inactivity' | 'auto'
+
+  // Suivi de l'inactivité en 2 temps. Remis à null dès qu'il y a une nouvelle activité.
+  inactivityWarnedAt: { type: Date, default: null },
+
+  // Note laissée par l'utilisateur après la fermeture (1 à 5), via DM.
+  rating: { type: Number, min: 1, max: 5, default: null },
 
   lastActivityAt: { type: Date, default: Date.now },
   closedAt: { type: Date, default: null },
