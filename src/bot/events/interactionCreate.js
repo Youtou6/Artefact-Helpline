@@ -5,6 +5,7 @@ const {
   handleRedirectOpen,
   handleRedirectSelect,
   handleForceRemind,
+  handleAiFollowUp,
   handleRating,
 } = require('../ticketChannel');
 const { handleCannedCommand, handleCannedSelect } = require('../cannedMenu');
@@ -19,6 +20,7 @@ module.exports = async function onInteractionCreate(interaction) {
       if (scope === 'ticket' && action === 'close') return handleClose(interaction, id, { reason: 'staff' });
       if (scope === 'ticket' && action === 'redirect') return handleRedirectOpen(interaction, id);
       if (scope === 'ticket' && action === 'remind') return handleForceRemind(interaction, id);
+      if (scope === 'ticket' && action === 'ai') return handleAiFollowUp(interaction, id);
       if (scope === 'rating') return handleRating(interaction, Number(action), id);
       return;
     }

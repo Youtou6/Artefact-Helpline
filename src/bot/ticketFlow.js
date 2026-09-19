@@ -8,6 +8,7 @@ const Counter = require('../models/Counter');
 const { translateText } = require('./translate');
 const flowState = require('./flowState');
 const {
+  buildSimpleContainerMessage,
   buildLanguageSelectMessage,
   buildCategorySelectMessage,
   buildQuestionMessage,
@@ -68,7 +69,7 @@ async function handleDirectMessage(message) {
 
   const blacklisted = await Blacklist.findOne({ userId });
   if (blacklisted) {
-    await message.channel.send(BLACKLIST_TEXT).catch(() => {});
+    await message.channel.send(buildSimpleContainerMessage(BLACKLIST_TEXT)).catch(() => {});
     return;
   }
 
@@ -85,7 +86,7 @@ async function handleDirectMessage(message) {
     const settings = await Settings.getSingleton();
     if (settings.antiSpam?.maxAttempts) {
       if (flowState.isRateLimited(userId, settings.antiSpam.windowMinutes, settings.antiSpam.maxAttempts)) {
-        await message.channel.send(COOLDOWN_TEXT.en + '\n' + COOLDOWN_TEXT.fr + '\n' + COOLDOWN_TEXT.de).catch(() => {});
+        await message.channel.send(buildSimpleContainerMessage([COOLDOWN_TEXT.en, COOLDOWN_TEXT.fr, COOLDOWN_TEXT.de])).catch(() => {});
         return;
       }
       flowState.recordAttempt(userId);
@@ -97,12 +98,12 @@ async function handleDirectMessage(message) {
   }
 
   if (flow.step === 'language') {
-    await message.channel.send(REMINDER_TEXT.language).catch(() => {});
+    await message.channel.send(buildSimpleContainerMessage(REMINDER_TEXT.language)).catch(() => {});
     return;
   }
 
   if (flow.step === 'category') {
-    await message.channel.send(REMINDER_TEXT[flow.language] || REMINDER_TEXT.en).catch(() => {});
+    await message.channel.send(buildSimpleContainerMessage(REMINDER_TEXT[flow.language] || REMINDER_TEXT.en)).catch(() => {});
     return;
   }
 
@@ -119,7 +120,7 @@ async function handleLanguageSelect(interaction) {
   const flow = flowState.getFlow(userId);
 
   if (!flow || flow.step !== 'language') {
-    await interaction.reply('This session has expired. Please send a new message to start again.').catch(() => {});
+    await interaction.reply(buildSimpleContainerMessage('This session has expired. Please send a new message to start again.')).catch(() => {});
     return;
   }
 
@@ -151,14 +152,14 @@ async function handleCategorySelect(interaction) {
   const flow = flowState.getFlow(userId);
 
   if (!flow || flow.step !== 'category') {
-    await interaction.reply('This session has expired. Please send a new message to start again.').catch(() => {});
+    await interaction.reply(buildSimpleContainerMessage('This session has expired. Please send a new message to start again.')).catch(() => {});
     return;
   }
 
   const categoryId = interaction.values[0];
   const category = await Category.findById(categoryId);
   if (!category || !category.active) {
-    await interaction.reply('This category is no longer available.').catch(() => {});
+    await interaction.reply(buildSimpleContainerMessage('This category is no longer available.')).catch(() => {});
     flowState.clearFlow(userId);
     return;
   }
@@ -208,13 +209,13 @@ async function handleQuestionSelect(interaction) {
   const flow = flowState.getFlow(userId);
 
   if (!flow || flow.step !== 'questions') {
-    await interaction.reply('This session has expired. Please send a new message to start again.').catch(() => {});
+    await interaction.reply(buildSimpleContainerMessage('This session has expired. Please send a new message to start again.')).catch(() => {});
     return;
   }
 
   const question = flow.questions[flow.index];
   if (!question || question.type !== 'select') {
-    await interaction.reply('This question is no longer active.').catch(() => {});
+    await interaction.reply(buildSimpleContainerMessage('This question is no longer active.')).catch(() => {});
     return;
   }
 
@@ -237,7 +238,7 @@ async function handleQuestionAnswer(message, flow) {
 
   // Une question "select" ne se répond que via le menu déroulant.
   if (question.type === 'select') {
-    await message.channel.send(SELECT_REQUIRED_TEXT[lang] || SELECT_REQUIRED_TEXT.en).catch(() => {});
+    await message.channel.send(buildSimpleContainerMessage(SELECT_REQUIRED_TEXT[lang] || SELECT_REQUIRED_TEXT.en)).catch(() => {});
     return;
   }
 
@@ -245,7 +246,7 @@ async function handleQuestionAnswer(message, flow) {
   if (question.type === 'file') {
     const attachmentUrls = [...message.attachments.values()].map((a) => a.url);
     if (attachmentUrls.length === 0) {
-      await message.channel.send(FILE_REQUIRED_TEXT[lang] || FILE_REQUIRED_TEXT.en).catch(() => {});
+      await message.channel.send(buildSimpleContainerMessage(FILE_REQUIRED_TEXT[lang] || FILE_REQUIRED_TEXT.en)).catch(() => {});
       return;
     }
     flow.answers.push({ question: question.text, type: 'file', answer: attachmentUrls.join('\n'), answerFr: null });

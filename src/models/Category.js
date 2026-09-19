@@ -37,6 +37,10 @@ const CategorySchema = new Schema({
   inactivityCloseMinutes: { type: Number, default: 0 },
 
   questions: { type: [QuestionSchema], default: [] },
+
+  // Contexte/instructions libres donnés à l'IA (Gemini) pour cette catégorie,
+  // utilisés quand le staff clique sur "Question IA" dans un ticket.
+  aiContext: { type: String, default: '' },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Category', CategorySchema);

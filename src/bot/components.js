@@ -10,8 +10,9 @@ const {
   MessageFlags,
 } = require('discord.js');
 
-// Flag obligatoire pour tout message utilisant les Components V2.
+// Flags obligatoires pour tout message utilisant les Components V2.
 const CV2_FLAGS = MessageFlags.IsComponentsV2;
+const CV2_EPHEMERAL_FLAGS = MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral;
 
 /**
  * Construit un container "brut" (aucun setAccentColor => pas de bande de couleur
@@ -34,6 +35,12 @@ function buildTextContainer(blocks, { withSeparators = false } = {}) {
 function withActionRow(container, actionRow) {
   container.addActionRowComponents(actionRow);
   return container;
+}
+
+/** Wrapper générique : un simple message texte propre, en container, sans bouton. */
+function buildSimpleContainerMessage(textOrLines, { ephemeral = false } = {}) {
+  const lines = Array.isArray(textOrLines) ? textOrLines : [textOrLines];
+  return { components: [buildTextContainer(lines)], flags: ephemeral ? CV2_EPHEMERAL_FLAGS : CV2_FLAGS };
 }
 
 // ─── Sélection de la langue ────────────────────────────────────────────────
@@ -169,9 +176,14 @@ function buildTicketPanel({ ticket, category, user, claimedTag, closed, pingRole
         .setEmoji('🔀'),
       new ButtonBuilder()
         .setCustomId(`ticket:remind:${ticket._id}`)
-        .setLabel('Forcer le rappel d\'inactivité')
+        .setLabel('Forcer le rappel')
         .setStyle(ButtonStyle.Secondary)
-        .setEmoji('⏰')
+        .setEmoji('⏰'),
+      new ButtonBuilder()
+        .setCustomId(`ticket:ai:${ticket._id}`)
+        .setLabel('Question IA')
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji('🤖')
     );
     withActionRow(container, row1);
     withActionRow(container, row2);
@@ -182,6 +194,7 @@ function buildTicketPanel({ ticket, category, user, claimedTag, closed, pingRole
 
 // ─── Menu de redirection vers une autre catégorie (ephemeral, côté staff) ──
 function buildCategoryRedirectSelect(categories, ticketId) {
+  const container = buildTextContainer(['Rediriger ce ticket vers :']);
   const select = new StringSelectMenuBuilder()
     .setCustomId(`redirect:select:${ticketId}`)
     .setPlaceholder('Choisir la nouvelle catégorie')
@@ -190,10 +203,11 @@ function buildCategoryRedirectSelect(categories, ticketId) {
       value: c._id.toString(),
       emoji: c.emoji || undefined,
     })));
-  return { content: 'Rediriger ce ticket vers :', components: [new ActionRowBuilder().addComponents(select)], ephemeral: true };
+  withActionRow(container, new ActionRowBuilder().addComponents(select));
+  return { components: [container], flags: CV2_EPHEMERAL_FLAGS };
 }
 
-// ─── Notifications DM (texte simple) ───────────────────────────────────────
+// ─── Notifications DM ───────────────────────────────────────────────────────
 const CLAIM_NOTIFY_TEXT = {
   en: (tag) => `🙋 Your ticket has been picked up by **${tag}**. They'll be assisting you from now on.`,
   fr: (tag) => `🙋 Votre ticket a été pris en charge par **${tag}**. Cette personne va vous accompagner à partir de maintenant.`,
@@ -205,9 +219,9 @@ const CLAIM_NOTIFY_TEXT_ANON = {
   de: '🙋 Ihr Ticket wurde von unserem Team übernommen. Jemand wird Sie ab jetzt betreuen.',
 };
 
-function buildClaimNotifyText(lang, staffTag, anonymous) {
-  if (anonymous) return CLAIM_NOTIFY_TEXT_ANON[lang] || CLAIM_NOTIFY_TEXT_ANON.en;
-  return (CLAIM_NOTIFY_TEXT[lang] || CLAIM_NOTIFY_TEXT.en)(staffTag);
+function buildClaimNotifyMessage(lang, staffTag, anonymous) {
+  const text = anonymous ? (CLAIM_NOTIFY_TEXT_ANON[lang] || CLAIM_NOTIFY_TEXT_ANON.en) : (CLAIM_NOTIFY_TEXT[lang] || CLAIM_NOTIFY_TEXT.en)(staffTag);
+  return buildSimpleContainerMessage(text);
 }
 
 const REDIRECT_NOTIFY_TEXT = {
@@ -215,8 +229,9 @@ const REDIRECT_NOTIFY_TEXT = {
   fr: (cat) => `🔀 Votre ticket a été redirigé vers une autre catégorie : **${cat}**. Un membre de cette équipe va prendre le relais.`,
   de: (cat) => `🔀 Ihr Ticket wurde in eine andere Kategorie verschoben: **${cat}**. Ein Mitarbeiter dieses Teams wird sich nun darum kümmern.`,
 };
-function buildRedirectNotifyText(lang, newCategoryName) {
-  return (REDIRECT_NOTIFY_TEXT[lang] || REDIRECT_NOTIFY_TEXT.en)(newCategoryName);
+function buildRedirectNotifyMessage(lang, newCategoryName) {
+  const text = (REDIRECT_NOTIFY_TEXT[lang] || REDIRECT_NOTIFY_TEXT.en)(newCategoryName);
+  return buildSimpleContainerMessage(text);
 }
 
 const INACTIVITY_REMINDER_TEXT = {
@@ -224,8 +239,8 @@ const INACTIVITY_REMINDER_TEXT = {
   fr: 'Nous n\'avons plus de nouvelles depuis un moment 👋 Avez-vous encore besoin d\'aide ? Ce ticket sera fermé automatiquement en l\'absence de réponse.',
   de: 'Wir haben schon länger nichts mehr von Ihnen gehört 👋 Benötigen Sie noch Hilfe? Dieses Ticket wird automatisch geschlossen, wenn keine Antwort erfolgt.',
 };
-function buildInactivityReminderText(lang) {
-  return INACTIVITY_REMINDER_TEXT[lang] || INACTIVITY_REMINDER_TEXT.en;
+function buildInactivityReminderMessage(lang) {
+  return buildSimpleContainerMessage(INACTIVITY_REMINDER_TEXT[lang] || INACTIVITY_REMINDER_TEXT.en);
 }
 
 const CLOSE_TEXT = {
@@ -242,9 +257,14 @@ const CLOSE_TEXT = {
     inactivity: 'Dieses Ticket wurde automatisch wegen Inaktivität geschlossen. Kontaktieren Sie uns gerne jederzeit erneut per DM.',
   },
 };
-function buildCloseText(lang, reason = 'staff') {
+function buildCloseMessage(lang, reason = 'staff') {
   const dict = CLOSE_TEXT[lang] || CLOSE_TEXT.en;
-  return dict[reason] || dict.staff;
+  return buildSimpleContainerMessage(dict[reason] || dict.staff);
+}
+
+// ─── Question posée par l'IA (DM) ───────────────────────────────────────────
+function buildAiQuestionMessage(questionText) {
+  return buildSimpleContainerMessage(`🤖 ${questionText}`);
 }
 
 // ─── Notation post-ticket ───────────────────────────────────────────────────
@@ -273,23 +293,27 @@ const RATING_THANKS_TEXT = {
   fr: (n) => `Merci pour votre retour ! Vous nous avez noté ${'⭐'.repeat(n)}.`,
   de: (n) => `Danke für Ihr Feedback! Sie haben uns mit ${'⭐'.repeat(n)} bewertet.`,
 };
-function buildRatingThanksText(lang, rating) {
-  return (RATING_THANKS_TEXT[lang] || RATING_THANKS_TEXT.en)(rating);
+function buildRatingThanksMessage(lang, rating) {
+  const text = (RATING_THANKS_TEXT[lang] || RATING_THANKS_TEXT.en)(rating);
+  return buildSimpleContainerMessage(text);
 }
 
 module.exports = {
   CV2_FLAGS,
+  CV2_EPHEMERAL_FLAGS,
   buildTextContainer,
+  buildSimpleContainerMessage,
   buildLanguageSelectMessage,
   buildCategorySelectMessage,
   buildQuestionMessage,
   buildTicketCreatedMessage,
   buildTicketPanel,
   buildCategoryRedirectSelect,
-  buildClaimNotifyText,
-  buildRedirectNotifyText,
-  buildInactivityReminderText,
-  buildCloseText,
+  buildClaimNotifyMessage,
+  buildRedirectNotifyMessage,
+  buildInactivityReminderMessage,
+  buildCloseMessage,
+  buildAiQuestionMessage,
   buildRatingRequestMessage,
-  buildRatingThanksText,
+  buildRatingThanksMessage,
 };

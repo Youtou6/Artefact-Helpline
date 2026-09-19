@@ -120,14 +120,25 @@ Quand tu es prêt : invite le bot sur ton vrai serveur, va dans **Paramètres**,
 
 ---
 
-## Nouveautés : contexte utilisateur, notation, inactivité en 2 temps, redirection, questions avancées
+## Nouveautés : contexte utilisateur, notation, inactivité en 2 temps, redirection, questions avancées, IA
 
-- **Contexte utilisateur** : l'utilisateur reçoit désormais un DM à chaque étape clé (ticket créé avec son numéro et sa catégorie, prise en charge par un staff, redirection vers une autre catégorie, rappel d'inactivité, fermeture — avec la raison).
-- **Transcript** : un vrai fichier `.txt` lisible (horodatage, auteur, contenu, pièces jointes) est posté dans le salon de logs à chaque fermeture.
+- **Contexte utilisateur** : l'utilisateur reçoit désormais un DM à chaque étape clé (ticket créé avec son numéro et sa catégorie, prise en charge par un staff, redirection vers une autre catégorie, rappel d'inactivité, fermeture — avec la raison). Tous les messages du bot (y compris ces notifications) sont maintenant affichés en containers, sans bande de couleur, pour un rendu homogène.
+- **Transcript** : un vrai fichier `.txt` lisible (horodatage, auteur, contenu, pièces jointes, réponses au formulaire) est posté dans le salon de logs à chaque fermeture.
 - **Notation** : juste après la fermeture, l'utilisateur reçoit un DM avec 5 boutons ⭐ pour noter le support. La note apparaît dans le dashboard (onglet Tickets) et dans le salon de logs.
-- **Inactivité en 2 temps** (configurable par catégorie, dans le dashboard) : après *X* minutes sans activité, un rappel est envoyé à l'utilisateur et noté dans le salon ; si toujours rien après encore *Y* minutes, le ticket se ferme automatiquement. Un bouton **"Forcer le rappel d'inactivité"** sur le panneau du ticket permet de déclencher ce rappel manuellement, à tout moment.
+- **Inactivité en 2 temps** (configurable par catégorie, dans le dashboard) : après *X* minutes sans activité, un rappel est envoyé à l'utilisateur et noté dans le salon ; si toujours rien après encore *Y* minutes, le ticket se ferme automatiquement. Un bouton **"Forcer le rappel"** sur le panneau du ticket permet de déclencher ce rappel manuellement, à tout moment.
 - **Redirection de ticket** : bouton **"Rediriger"** sur le panneau du ticket → menu déroulant des autres catégories actives. Le salon est renommé, les permissions du rôle staff mises à jour, et l'utilisateur prévenu.
 - **Questions avancées** : dans l'éditeur de catégorie, chaque question a désormais un type — *Texte libre*, *Menu déroulant* (avec ses options séparées par des virgules) ou *Fichier requis* (le bot exige une pièce jointe avant de continuer).
+- **Assistant IA (Gemini, gratuit)** : chaque catégorie peut avoir un champ "Contexte pour l'IA" dans le dashboard (ex : *"Cette catégorie sert aux commandes de build Roblox sur mesure, demande le budget, le style, la deadline..."*). Dans un salon de ticket, le bouton **"Question IA"** demande à Gemini de générer UNE question de suivi pertinente (en tenant compte des réponses au formulaire et de la conversation récente), et l'envoie directement à l'utilisateur en DM. Le staff garde la main : l'IA ne parle jamais toute seule, elle propose une question à la demande.
+
+### Configurer l'IA (Gemini, gratuit)
+
+1. Va sur https://aistudio.google.com/apikey (connecte-toi avec un compte Google).
+2. Clique sur **Create API key** → copie la clé générée.
+3. Sur Render, ajoute la variable d'environnement `GEMINI_API_KEY` avec cette valeur, puis redéploie.
+4. C'est tout — le bouton "Question IA" fonctionne dès le prochain ticket. Le tier gratuit de Google AI Studio suffit largement pour cet usage (quelques questions par ticket, pas de gros volume).
+5. Si besoin de changer de modèle (`GEMINI_MODEL`, par défaut `gemini-2.0-flash`), la liste à jour des modèles disponibles est sur https://ai.google.dev/gemini-api/docs/models.
+
+⚠️ Sur le tier gratuit, Google peut utiliser le contenu envoyé pour améliorer ses modèles — évite d'y mettre des informations sensibles (coordonnées bancaires, etc.). Le contexte de catégorie et les réponses du formulaire suffisent largement pour des questions de suivi utiles.
 
 
 

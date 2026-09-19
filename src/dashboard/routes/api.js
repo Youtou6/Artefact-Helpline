@@ -92,7 +92,7 @@ router.get('/categories', async (req, res) => {
 
 router.post('/categories', async (req, res) => {
   try {
-    const { name, emoji, staffRoleId, ticketNameFormat, anonymousReplies, inactivityWarningMinutes, inactivityCloseMinutes, order } = req.body;
+    const { name, emoji, staffRoleId, ticketNameFormat, anonymousReplies, inactivityWarningMinutes, inactivityCloseMinutes, order, aiContext } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: 'name_required' });
 
     let key = slugify(name);
@@ -113,6 +113,7 @@ router.post('/categories', async (req, res) => {
       inactivityWarningMinutes: Number(inactivityWarningMinutes) || 0,
       inactivityCloseMinutes: Number(inactivityCloseMinutes) || 0,
       order: Number(order) || 0,
+      aiContext: aiContext || '',
       questions: [],
     });
     res.status(201).json(category);
@@ -123,7 +124,7 @@ router.post('/categories', async (req, res) => {
 
 router.put('/categories/:id', async (req, res) => {
   try {
-    const allowed = ['name', 'emoji', 'staffRoleId', 'ticketNameFormat', 'anonymousReplies', 'inactivityWarningMinutes', 'inactivityCloseMinutes', 'order', 'active', 'questions'];
+    const allowed = ['name', 'emoji', 'staffRoleId', 'ticketNameFormat', 'anonymousReplies', 'inactivityWarningMinutes', 'inactivityCloseMinutes', 'order', 'active', 'questions', 'aiContext'];
     const update = {};
     for (const key of allowed) {
       if (req.body[key] !== undefined) update[key] = req.body[key];

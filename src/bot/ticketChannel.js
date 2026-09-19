@@ -5,17 +5,21 @@ const Category = require('../models/Category');
 const Ticket = require('../models/Ticket');
 const { translateText } = require('./translate');
 const { isStaffMember } = require('./permissions');
+const { generateFollowUpQuestion } = require('./ai');
 const {
   buildTicketPanel,
   buildTextContainer,
+  buildSimpleContainerMessage,
   buildCategoryRedirectSelect,
-  buildClaimNotifyText,
-  buildRedirectNotifyText,
-  buildInactivityReminderText,
-  buildCloseText,
+  buildClaimNotifyMessage,
+  buildRedirectNotifyMessage,
+  buildInactivityReminderMessage,
+  buildCloseMessage,
+  buildAiQuestionMessage,
   buildRatingRequestMessage,
-  buildRatingThanksText,
+  buildRatingThanksMessage,
   CV2_FLAGS,
+  CV2_EPHEMERAL_FLAGS,
 } = require('./components');
 
 /** Marque une activité sur le ticket et annule un éventuel rappel d'inactivité en cours. */
@@ -68,16 +72,16 @@ async function relayStaffMessage(message, ticket, category) {
 async function handleClaim(interaction, ticketId) {
   const ticket = await Ticket.findById(ticketId);
   if (!ticket || ticket.status !== 'open') {
-    await interaction.reply({ content: 'Ce ticket n\'existe plus ou est déjà fermé.', ephemeral: true }).catch(() => {});
+    await interaction.reply({ ...buildSimpleContainerMessage('Ce ticket n\'existe plus ou est déjà fermé.', { ephemeral: true }) }).catch(() => {});
     return;
   }
   const category = await Category.findById(ticket.categoryId);
   if (!isStaffMember(interaction.member, category?.staffRoleId)) {
-    await interaction.reply({ content: 'Tu n\'as pas la permission de faire ça.', ephemeral: true }).catch(() => {});
+    await interaction.reply(buildSimpleContainerMessage('Tu n\'as pas la permission de faire ça.', { ephemeral: true })).catch(() => {});
     return;
   }
   if (ticket.claimedBy) {
-    await interaction.reply({ content: `Déjà pris en charge par ${ticket.claimedByTag}.`, ephemeral: true }).catch(() => {});
+    await interaction.reply(buildSimpleContainerMessage(`Déjà pris en charge par ${ticket.claimedByTag}.`, { ephemeral: true })).catch(() => {});
     return;
   }
 
@@ -95,10 +99,7 @@ async function handleClaim(interaction, ticketId) {
   // Contexte pour l'utilisateur : qui s'occupe de son ticket désormais.
   if (user) {
     const dm = await user.createDM().catch(() => null);
-    if (dm) {
-      const text = buildClaimNotifyText(ticket.language, ticket.claimedByTag, category.anonymousReplies);
-      await dm.send(text).catch(() => {});
-    }
+    if (dm) await dm.send(buildClaimNotifyMessage(ticket.language, ticket.claimedByTag, category.anonymousReplies)).catch(() => {});
   }
 }
 
@@ -106,18 +107,18 @@ async function handleClaim(interaction, ticketId) {
 async function handleRedirectOpen(interaction, ticketId) {
   const ticket = await Ticket.findById(ticketId);
   if (!ticket || ticket.status !== 'open') {
-    await interaction.reply({ content: 'Ce ticket n\'existe plus ou est déjà fermé.', ephemeral: true }).catch(() => {});
+    await interaction.reply(buildSimpleContainerMessage('Ce ticket n\'existe plus ou est déjà fermé.', { ephemeral: true })).catch(() => {});
     return;
   }
   const category = await Category.findById(ticket.categoryId);
   if (!isStaffMember(interaction.member, category?.staffRoleId)) {
-    await interaction.reply({ content: 'Tu n\'as pas la permission de faire ça.', ephemeral: true }).catch(() => {});
+    await interaction.reply(buildSimpleContainerMessage('Tu n\'as pas la permission de faire ça.', { ephemeral: true })).catch(() => {});
     return;
   }
 
   const others = await Category.find({ active: true, _id: { $ne: ticket.categoryId } }).sort('order');
   if (others.length === 0) {
-    await interaction.reply({ content: 'Aucune autre catégorie active disponible.', ephemeral: true }).catch(() => {});
+    await interaction.reply(buildSimpleContainerMessage('Aucune autre catégorie active disponible.', { ephemeral: true })).catch(() => {});
     return;
   }
 
@@ -135,7 +136,7 @@ async function handleRedirectSelect(interaction) {
   const oldCategory = ticket ? await Category.findById(ticket.categoryId) : null;
 
   if (!ticket || ticket.status !== 'open' || !newCategory) {
-    await interaction.update({ content: 'Ce ticket ou cette catégorie n\'existe plus.', components: [] }).catch(() => {});
+    await interaction.update(buildSimpleContainerMessage('Ce ticket ou cette catégorie n\'existe plus.', { ephemeral: true })).catch(() => {});
     return;
   }
 
@@ -171,7 +172,7 @@ async function handleRedirectSelect(interaction) {
   // Contexte pour l'utilisateur : sa demande a changé de catégorie.
   if (user) {
     const dm = await user.createDM().catch(() => null);
-    if (dm) await dm.send(buildRedirectNotifyText(ticket.language, newCategory.name)).catch(() => {});
+    if (dm) await dm.send(buildRedirectNotifyMessage(ticket.language, newCategory.name)).catch(() => {});
   }
 
   // Rafraîchit le panneau du ticket dans le salon.
@@ -180,30 +181,30 @@ async function handleRedirectSelect(interaction) {
       ticket, category: newCategory, user: user || { id: ticket.userId, tag: ticket.username },
       claimedTag: ticket.claimedByTag, closed: false, pingRoleId: newCategory.staffRoleId,
     });
-    await channel.send({
-      content: `🔀 Ticket redirigé vers **${newCategory.name}** par ${interaction.member?.displayName || interaction.user.username}.`,
-    }).catch(() => {});
+    await channel.send(buildSimpleContainerMessage(
+      `🔀 Ticket redirigé vers **${newCategory.name}** par ${interaction.member?.displayName || interaction.user.username}.`
+    )).catch(() => {});
     await channel.send({ ...panel, allowedMentions: { roles: newCategory.staffRoleId ? [newCategory.staffRoleId] : [] } }).catch(() => {});
   }
 
-  await interaction.update({ content: `✅ Ticket redirigé vers "${newCategory.name}".`, components: [] }).catch(() => {});
+  await interaction.update(buildSimpleContainerMessage(`✅ Ticket redirigé vers "${newCategory.name}".`, { ephemeral: true })).catch(() => {});
 }
 
 /** Bouton "Forcer le rappel d'inactivité" : envoie le rappel tout de suite, sans attendre le délai. */
 async function handleForceRemind(interaction, ticketId) {
   const ticket = await Ticket.findById(ticketId);
   if (!ticket || ticket.status !== 'open') {
-    await interaction.reply({ content: 'Ce ticket n\'existe plus ou est déjà fermé.', ephemeral: true }).catch(() => {});
+    await interaction.reply(buildSimpleContainerMessage('Ce ticket n\'existe plus ou est déjà fermé.', { ephemeral: true })).catch(() => {});
     return;
   }
   const category = await Category.findById(ticket.categoryId);
   if (!isStaffMember(interaction.member, category?.staffRoleId)) {
-    await interaction.reply({ content: 'Tu n\'as pas la permission de faire ça.', ephemeral: true }).catch(() => {});
+    await interaction.reply(buildSimpleContainerMessage('Tu n\'as pas la permission de faire ça.', { ephemeral: true })).catch(() => {});
     return;
   }
 
   await sendInactivityReminder(ticket, category);
-  await interaction.reply({ content: '⏰ Rappel d\'inactivité envoyé à l\'utilisateur.', ephemeral: true }).catch(() => {});
+  await interaction.reply(buildSimpleContainerMessage('⏰ Rappel d\'inactivité envoyé à l\'utilisateur.', { ephemeral: true })).catch(() => {});
 
   const user = await client.users.fetch(ticket.userId).catch(() => null);
   const channel = await client.channels.fetch(ticket.channelId).catch(() => null);
@@ -221,23 +222,79 @@ async function sendInactivityReminder(ticket, category) {
   const user = await client.users.fetch(ticket.userId).catch(() => null);
   if (user) {
     const dm = await user.createDM().catch(() => null);
-    if (dm) await dm.send(buildInactivityReminderText(ticket.language)).catch(() => {});
+    if (dm) await dm.send(buildInactivityReminderMessage(ticket.language)).catch(() => {});
   }
 
   const channel = await client.channels.fetch(ticket.channelId).catch(() => null);
   if (channel) {
-    await channel.send('⏰ Rappel d\'inactivité envoyé à l\'utilisateur (aucune réponse depuis un moment).').catch(() => {});
+    await channel.send(buildSimpleContainerMessage('⏰ Rappel d\'inactivité envoyé à l\'utilisateur (aucune réponse depuis un moment).')).catch(() => {});
   }
 
   ticket.inactivityWarnedAt = new Date();
   await ticket.save();
 }
 
+/** Bouton "Question IA" : Gemini propose une question de suivi à partir du contexte de la catégorie. */
+async function handleAiFollowUp(interaction, ticketId) {
+  const ticket = await Ticket.findById(ticketId);
+  if (!ticket || ticket.status !== 'open') {
+    await interaction.reply(buildSimpleContainerMessage('Ce ticket n\'existe plus ou est déjà fermé.', { ephemeral: true })).catch(() => {});
+    return;
+  }
+  const category = await Category.findById(ticket.categoryId);
+  if (!isStaffMember(interaction.member, category?.staffRoleId)) {
+    await interaction.reply(buildSimpleContainerMessage('Tu n\'as pas la permission de faire ça.', { ephemeral: true })).catch(() => {});
+    return;
+  }
+
+  await interaction.deferReply({ flags: CV2_EPHEMERAL_FLAGS }).catch(() => interaction.deferReply({ ephemeral: true }).catch(() => {}));
+
+  const channel = await client.channels.fetch(ticket.channelId).catch(() => null);
+  let recentMessages = [];
+  if (channel) {
+    const fetched = await channel.messages.fetch({ limit: 12 }).catch(() => new Map());
+    recentMessages = [...fetched.values()]
+      .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+      .filter((m) => m.content?.trim())
+      .map((m) => `${m.author?.bot ? 'Bot' : (m.member?.displayName || m.author?.username || 'user')}: ${m.content}`);
+  }
+
+  try {
+    const question = await generateFollowUpQuestion({
+      categoryContext: category?.aiContext,
+      answers: ticket.answers,
+      language: ticket.language,
+      recentMessages,
+    });
+
+    const user = await client.users.fetch(ticket.userId).catch(() => null);
+    if (user) {
+      const dm = await user.createDM().catch(() => null);
+      if (dm) await dm.send(buildAiQuestionMessage(question)).catch(() => {});
+    }
+
+    if (channel) {
+      await channel.send(buildSimpleContainerMessage(
+        `🤖 Question générée par l'IA et envoyée à l'utilisateur :\n> ${question}`
+      )).catch(() => {});
+    }
+
+    await interaction.editReply(buildSimpleContainerMessage(`✅ Question envoyée :\n> ${question}`)).catch(() => {});
+  } catch (err) {
+    console.error('[ai] erreur :', err.message);
+    let msg = `❌ Erreur IA : ${err.message}`;
+    if (err.code === 'missing_api_key') {
+      msg = '❌ Aucune clé Gemini configurée. Ajoute GEMINI_API_KEY dans les variables d\'environnement (voir README).';
+    }
+    await interaction.editReply(buildSimpleContainerMessage(msg)).catch(() => {});
+  }
+}
+
 /** Bouton "Fermer le ticket" ou fermeture automatique (reason = 'staff' | 'inactivity'). */
 async function handleClose(interaction, ticketId, { reason = 'staff' } = {}) {
   const ticket = await Ticket.findById(ticketId);
   if (!ticket || ticket.status !== 'open') {
-    if (interaction) await interaction.reply({ content: 'Ce ticket est déjà fermé.', ephemeral: true }).catch(() => {});
+    if (interaction) await interaction.reply(buildSimpleContainerMessage('Ce ticket est déjà fermé.', { ephemeral: true })).catch(() => {});
     return;
   }
 
@@ -246,7 +303,7 @@ async function handleClose(interaction, ticketId, { reason = 'staff' } = {}) {
 
   if (interaction && !auto) {
     if (!isStaffMember(interaction.member, category?.staffRoleId)) {
-      await interaction.reply({ content: 'Tu n\'as pas la permission de faire ça.', ephemeral: true }).catch(() => {});
+      await interaction.reply(buildSimpleContainerMessage('Tu n\'as pas la permission de faire ça.', { ephemeral: true })).catch(() => {});
       return;
     }
     await interaction.deferUpdate().catch(() => {});
@@ -278,9 +335,7 @@ async function handleClose(interaction, ticketId, { reason = 'staff' } = {}) {
   const user = await client.users.fetch(ticket.userId).catch(() => null);
   if (user) {
     const dm = await user.createDM().catch(() => null);
-    if (dm) {
-      await dm.send(buildCloseText(ticket.language, auto ? 'inactivity' : 'staff')).catch(() => {});
-    }
+    if (dm) await dm.send(buildCloseMessage(ticket.language, auto ? 'inactivity' : 'staff')).catch(() => {});
   }
 
   ticket.status = 'closed';
@@ -304,28 +359,27 @@ async function handleClose(interaction, ticketId, { reason = 'staff' } = {}) {
 async function handleRating(interaction, rating, ticketId) {
   const ticket = await Ticket.findById(ticketId);
   if (!ticket) {
-    await interaction.update({ content: 'Ce ticket n\'existe plus.', components: [] }).catch(() => {});
+    await interaction.update(buildSimpleContainerMessage('Ce ticket n\'existe plus.')).catch(() => {});
     return;
   }
   if (ticket.rating) {
-    await interaction.update({ content: buildRatingThanksText(ticket.language, ticket.rating), components: [] }).catch(() => {});
+    await interaction.update(buildRatingThanksMessage(ticket.language, ticket.rating)).catch(() => {});
     return;
   }
 
   ticket.rating = rating;
   await ticket.save();
 
-  await interaction.update({
-    content: buildRatingThanksText(ticket.language, rating),
-    components: [],
-  }).catch(() => {});
+  await interaction.update(buildRatingThanksMessage(ticket.language, rating)).catch(() => {});
 
   // Contexte pour le staff : la note tombe dans le salon des logs.
   const settings = await Settings.getSingleton();
   if (settings.logChannelId) {
     const logChannel = await client.channels.fetch(settings.logChannelId).catch(() => null);
     if (logChannel) {
-      await logChannel.send(`⭐ Ticket #${ticket.ticketNumber} noté **${rating}/5** par ${ticket.username}.`).catch(() => {});
+      await logChannel.send(buildSimpleContainerMessage(
+        `⭐ Ticket #${ticket.ticketNumber} noté **${rating}/5** par ${ticket.username}.`
+      )).catch(() => {});
     }
   }
 }
@@ -379,14 +433,12 @@ function startAutoCloseChecker() {
         if (!category) continue;
 
         if (!ticket.inactivityWarnedAt) {
-          // Étape 1 : rappel après `inactivityWarningMinutes` d'inactivité.
           if (!category.inactivityWarningMinutes) continue;
           const inactiveMs = Date.now() - new Date(ticket.lastActivityAt).getTime();
           if (inactiveMs > category.inactivityWarningMinutes * 60 * 1000) {
             await sendInactivityReminder(ticket, category);
           }
         } else {
-          // Étape 2 : fermeture après `inactivityCloseMinutes` supplémentaires depuis le rappel.
           if (!category.inactivityCloseMinutes) continue;
           const sinceWarnMs = Date.now() - new Date(ticket.inactivityWarnedAt).getTime();
           if (sinceWarnMs > category.inactivityCloseMinutes * 60 * 1000) {
@@ -397,7 +449,7 @@ function startAutoCloseChecker() {
     } catch (err) {
       console.error('[inactivityChecker] erreur :', err.message);
     }
-  }, 60 * 1000); // vérification toutes les minutes (délais configurés en minutes, on veut rester précis)
+  }, 60 * 1000);
 }
 
 module.exports = {
@@ -408,6 +460,7 @@ module.exports = {
   handleRedirectOpen,
   handleRedirectSelect,
   handleForceRemind,
+  handleAiFollowUp,
   handleRating,
   startAutoCloseChecker,
 };

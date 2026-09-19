@@ -5,6 +5,11 @@ const Category = require('../models/Category');
 const CannedResponse = require('../models/CannedResponse');
 const { translateText } = require('./translate');
 const { isStaffMember } = require('./permissions');
+const {
+  buildTextContainer,
+  buildSimpleContainerMessage,
+  CV2_EPHEMERAL_FLAGS,
+} = require('./components');
 
 const cannedCommand = new SlashCommandBuilder()
   .setName('canned')
@@ -22,13 +27,13 @@ async function registerGuildCommands(guild) {
 async function handleCannedCommand(interaction) {
   const ticket = await Ticket.findOne({ channelId: interaction.channelId, status: 'open' });
   if (!ticket) {
-    await interaction.reply({ content: 'Cette commande doit être utilisée dans un salon de ticket ouvert.', ephemeral: true });
+    await interaction.reply(buildSimpleContainerMessage('Cette commande doit être utilisée dans un salon de ticket ouvert.', { ephemeral: true }));
     return;
   }
 
   const category = await Category.findById(ticket.categoryId);
   if (!isStaffMember(interaction.member, category?.staffRoleId)) {
-    await interaction.reply({ content: 'Tu n\'as pas la permission de faire ça.', ephemeral: true });
+    await interaction.reply(buildSimpleContainerMessage('Tu n\'as pas la permission de faire ça.', { ephemeral: true }));
     return;
   }
 
@@ -37,23 +42,21 @@ async function handleCannedCommand(interaction) {
   });
 
   if (responses.length === 0) {
-    await interaction.reply({
-      content: 'Aucune réponse prédéfinie configurée pour cette catégorie. Ajoutes-en depuis le dashboard.',
-      ephemeral: true,
-    });
+    await interaction.reply(buildSimpleContainerMessage(
+      'Aucune réponse prédéfinie configurée pour cette catégorie. Ajoutes-en depuis le dashboard.',
+      { ephemeral: true }
+    ));
     return;
   }
 
+  const container = buildTextContainer(['Sélectionne la réponse à envoyer :']);
   const select = new StringSelectMenuBuilder()
     .setCustomId(`canned:select:${ticket._id}`)
     .setPlaceholder('Choisir une réponse')
     .addOptions(responses.map((r) => ({ label: r.label.slice(0, 100), value: r._id.toString() })));
+  container.addActionRowComponents(new ActionRowBuilder().addComponents(select));
 
-  await interaction.reply({
-    content: 'Sélectionne la réponse à envoyer :',
-    components: [new ActionRowBuilder().addComponents(select)],
-    ephemeral: true,
-  });
+  await interaction.reply({ components: [container], flags: CV2_EPHEMERAL_FLAGS });
 }
 
 async function handleCannedSelect(interaction) {
@@ -65,7 +68,7 @@ async function handleCannedSelect(interaction) {
   const category = ticket ? await Category.findById(ticket.categoryId) : null;
 
   if (!ticket || ticket.status !== 'open' || !canned) {
-    await interaction.update({ content: 'Ce ticket ou cette réponse n\'existe plus.', components: [] }).catch(() => {});
+    await interaction.update(buildSimpleContainerMessage('Ce ticket ou cette réponse n\'existe plus.', { ephemeral: true })).catch(() => {});
     return;
   }
 
@@ -81,13 +84,15 @@ async function handleCannedSelect(interaction) {
 
   const channel = await client.channels.fetch(ticket.channelId).catch(() => null);
   if (channel) {
-    await channel.send(`📌 Réponse prédéfinie **"${canned.label}"** envoyée par ${interaction.member?.displayName || interaction.user.username}`).catch(() => {});
+    await channel.send(buildSimpleContainerMessage(
+      `📌 Réponse prédéfinie **"${canned.label}"** envoyée par ${interaction.member?.displayName || interaction.user.username}`
+    )).catch(() => {});
   }
 
   ticket.lastActivityAt = new Date();
   await ticket.save();
 
-  await interaction.update({ content: `✅ Réponse "${canned.label}" envoyée.`, components: [] }).catch(() => {});
+  await interaction.update(buildSimpleContainerMessage(`✅ Réponse "${canned.label}" envoyée.`, { ephemeral: true })).catch(() => {});
 }
 
 module.exports = { registerGuildCommands, handleCannedCommand, handleCannedSelect };

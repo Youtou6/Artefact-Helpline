@@ -22,5 +22,9 @@ services:
         generateValue: true
       - key: PUBLIC_URL
         sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.0-flash
       - key: NODE_ENV
         value: production

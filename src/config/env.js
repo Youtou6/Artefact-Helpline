@@ -32,4 +32,7 @@ module.exports = {
   sessionSecret: process.env.SESSION_SECRET,
   port: process.env.PORT || 3000,
   publicUrl: process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3000}`,
+  // Optionnel : sans clé, le bouton "Question IA" reste visible mais renvoie une erreur claire.
+  geminiApiKey: process.env.GEMINI_API_KEY || null,
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
 };

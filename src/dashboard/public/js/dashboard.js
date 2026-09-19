@@ -255,6 +255,11 @@ function renderCategories(roles) {
       </div>
       <div class="hint" style="margin-top:-8px; margin-bottom:14px;">Ex : 1440 puis 720 = rappel après 24h d'inactivité, fermeture 12h plus tard si toujours rien.</div>
 
+      <div class="field">
+        <label>Contexte pour l'IA (optionnel) — utilisé par le bouton "Question IA" dans les tickets</label>
+        <textarea data-field="aiContext" rows="3" placeholder="Ex : Cette catégorie sert aux commandes de build Roblox sur mesure. Pose des questions sur le budget, le style, la taille de la map, la deadline, les références visuelles.">${escapeHtml(cat.aiContext || '')}</textarea>
+      </div>
+
       <hr class="divider" />
       <label>Questions posées avant création du ticket</label>
       <div class="questions-list">
@@ -333,6 +338,7 @@ document.getElementById('categoriesList').addEventListener('click', async (e) =>
       anonymousReplies: get('anonymousReplies').checked,
       inactivityWarningMinutes: Number(get('inactivityWarningMinutes').value) || 0,
       inactivityCloseMinutes: Number(get('inactivityCloseMinutes').value) || 0,
+      aiContext: get('aiContext').value.trim(),
       active: get('active').checked,
       questions,
     };
