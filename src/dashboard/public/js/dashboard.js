@@ -256,8 +256,25 @@ function renderCategories(roles) {
       <div class="hint" style="margin-top:-8px; margin-bottom:14px;">Ex : 1440 puis 720 = rappel après 24h d'inactivité, fermeture 12h plus tard si toujours rien.</div>
 
       <div class="field">
-        <label>Contexte pour l'IA (optionnel) — utilisé par le bouton "Question IA" dans les tickets</label>
+        <label>Contexte pour l'IA (optionnel) — utilisé par le bouton "Question IA" et la réponse automatique</label>
         <textarea data-field="aiContext" rows="3" placeholder="Ex : Cette catégorie sert aux commandes de build Roblox sur mesure. Pose des questions sur le budget, le style, la taille de la map, la deadline, les références visuelles.">${escapeHtml(cat.aiContext || '')}</textarea>
+      </div>
+
+      <div class="checkbox-row field">
+        <input type="checkbox" data-field="aiAutoRespond" ${cat.aiAutoRespond ? 'checked' : ''} />
+        <label style="margin:0;">L'IA répond en premier, juste après la création du ticket (avant le staff)</label>
+      </div>
+
+      <label style="display:block; margin-bottom:6px;">Droits de l'IA pour cette catégorie</label>
+      <div class="field-row" style="margin-bottom:14px;">
+        <div class="checkbox-row field">
+          <input type="checkbox" data-field="aiCanAskQuestions" ${cat.aiPermissions?.canAskQuestions !== false ? 'checked' : ''} />
+          <label style="margin:0;">Peut poser des questions de suivi</label>
+        </div>
+        <div class="checkbox-row field">
+          <input type="checkbox" data-field="aiCanRedirect" ${cat.aiPermissions?.canRedirect ? 'checked' : ''} />
+          <label style="margin:0;">Peut rediriger vers une autre catégorie</label>
+        </div>
       </div>
 
       <hr class="divider" />
@@ -339,6 +356,11 @@ document.getElementById('categoriesList').addEventListener('click', async (e) =>
       inactivityWarningMinutes: Number(get('inactivityWarningMinutes').value) || 0,
       inactivityCloseMinutes: Number(get('inactivityCloseMinutes').value) || 0,
       aiContext: get('aiContext').value.trim(),
+      aiAutoRespond: get('aiAutoRespond').checked,
+      aiPermissions: {
+        canAskQuestions: get('aiCanAskQuestions').checked,
+        canRedirect: get('aiCanRedirect').checked,
+      },
       active: get('active').checked,
       questions,
     };

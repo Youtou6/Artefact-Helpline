@@ -339,6 +339,12 @@ async function finalizeTicket(user, flow, interaction = null) {
   if (interaction) await interaction.update(confirmPayload).catch(() => {});
   else await (await user.createDM()).send(confirmPayload).catch(() => {});
 
+  // "L'IA répond en premier" : déclenché juste après, sans bloquer la confirmation ci-dessus.
+  if (category.aiAutoRespond) {
+    const { triggerAiAutoRespond } = require('./ticketChannel');
+    await triggerAiAutoRespond(ticket, category).catch((err) => console.error('[ai:auto]', err));
+  }
+
   flowState.clearFlow(user.id);
 }
 

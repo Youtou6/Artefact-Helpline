@@ -128,15 +128,23 @@ Quand tu es prêt : invite le bot sur ton vrai serveur, va dans **Paramètres**,
 - **Inactivité en 2 temps** (configurable par catégorie, dans le dashboard) : après *X* minutes sans activité, un rappel est envoyé à l'utilisateur et noté dans le salon ; si toujours rien après encore *Y* minutes, le ticket se ferme automatiquement. Un bouton **"Forcer le rappel"** sur le panneau du ticket permet de déclencher ce rappel manuellement, à tout moment.
 - **Redirection de ticket** : bouton **"Rediriger"** sur le panneau du ticket → menu déroulant des autres catégories actives. Le salon est renommé, les permissions du rôle staff mises à jour, et l'utilisateur prévenu.
 - **Questions avancées** : dans l'éditeur de catégorie, chaque question a désormais un type — *Texte libre*, *Menu déroulant* (avec ses options séparées par des virgules) ou *Fichier requis* (le bot exige une pièce jointe avant de continuer).
-- **Assistant IA (Gemini, gratuit)** : chaque catégorie peut avoir un champ "Contexte pour l'IA" dans le dashboard (ex : *"Cette catégorie sert aux commandes de build Roblox sur mesure, demande le budget, le style, la deadline..."*). Dans un salon de ticket, le bouton **"Question IA"** demande à Gemini de générer UNE question de suivi pertinente (en tenant compte des réponses au formulaire et de la conversation récente), et l'envoie directement à l'utilisateur en DM. Le staff garde la main : l'IA ne parle jamais toute seule, elle propose une question à la demande.
+- **Assistant IA (Gemini, gratuit)** : chaque catégorie a un champ **"Contexte pour l'IA"** dans le dashboard (ex : *"Cette catégorie sert aux commandes de build Roblox sur mesure, demande le budget, le style, la deadline..."*), et deux **droits** activables séparément :
+  - *Peut poser des questions de suivi* : l'IA formule une question pertinente et l'envoie en DM.
+  - *Peut rediriger vers une autre catégorie* : si la demande ne correspond clairement pas à la catégorie actuelle, l'IA peut déplacer le ticket elle-même (salon renommé, permissions mises à jour, utilisateur prévenu — exactement comme une redirection manuelle, avec la raison notée en salon).
+  
+  Deux façons de la déclencher :
+  - **Manuellement** : bouton **"Question IA"** sur le panneau du ticket, à tout moment.
+  - **Automatiquement** : option **"L'IA répond en premier"** par catégorie — dès la création du ticket, avant même que le staff n'intervienne, l'IA analyse les réponses au formulaire et agit (pose une question ou redirige si besoin).
+
+  Techniquement, l'IA ne "décide" jamais dans le vide : elle choisit parmi les actions explicitement autorisées pour la catégorie (function calling Gemini), donc désactiver un droit dans le dashboard le rend réellement impossible à utiliser, pas juste déconseillé.
 
 ### Configurer l'IA (Gemini, gratuit)
 
 1. Va sur https://aistudio.google.com/apikey (connecte-toi avec un compte Google).
 2. Clique sur **Create API key** → copie la clé générée.
 3. Sur Render, ajoute la variable d'environnement `GEMINI_API_KEY` avec cette valeur, puis redéploie.
-4. C'est tout — le bouton "Question IA" fonctionne dès le prochain ticket. Le tier gratuit de Google AI Studio suffit largement pour cet usage (quelques questions par ticket, pas de gros volume).
-5. Si besoin de changer de modèle (`GEMINI_MODEL`, par défaut `gemini-2.0-flash`), la liste à jour des modèles disponibles est sur https://ai.google.dev/gemini-api/docs/models.
+4. C'est tout — le bouton "Question IA" fonctionne dès le prochain ticket. Le tier gratuit de Google AI Studio suffit largement pour cet usage (quelques appels par ticket, pas de gros volume).
+5. **Google fait évoluer ses modèles très régulièrement** (le nom par défaut de ce projet, `gemini-3.6-flash`, peut lui-même être retiré un jour). Si le bouton "Question IA" renvoie une erreur du type *"this model is no longer available"*, l'erreur indique elle-même le nom du modèle de remplacement recommandé — mets simplement à jour la variable `GEMINI_MODEL` sur Render (pas besoin de toucher au code) avec ce nom, puis redéploie. Liste à jour : https://ai.google.dev/gemini-api/docs/models.
 
 ⚠️ Sur le tier gratuit, Google peut utiliser le contenu envoyé pour améliorer ses modèles — évite d'y mettre des informations sensibles (coordonnées bancaires, etc.). Le contexte de catégorie et les réponses du formulaire suffisent largement pour des questions de suivi utiles.
 

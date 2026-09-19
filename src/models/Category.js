@@ -13,6 +13,12 @@ const QuestionSchema = new Schema({
   options: { type: [String], default: [] }, // uniquement pour type "select", français
 }, { _id: false });
 
+// Ce que l'IA a le droit de faire pour cette catégorie précise.
+const AiPermissionsSchema = new Schema({
+  canAskQuestions: { type: Boolean, default: true },
+  canRedirect: { type: Boolean, default: false },
+}, { _id: false });
+
 const CategorySchema = new Schema({
   // Slug technique stable, utilisé dans les noms de salons / customId. Ne change jamais après création.
   key: { type: String, required: true, unique: true },
@@ -31,16 +37,20 @@ const CategorySchema = new Schema({
   anonymousReplies: { type: Boolean, default: false },
 
   // Inactivité en 2 temps. 0 = étape désactivée.
-  // 1) après `inactivityWarningMinutes` sans activité -> rappel envoyé à l'utilisateur + note en salon
-  // 2) après encore `inactivityCloseMinutes` sans nouvelle activité depuis ce rappel -> fermeture auto
   inactivityWarningMinutes: { type: Number, default: 0 },
   inactivityCloseMinutes: { type: Number, default: 0 },
 
   questions: { type: [QuestionSchema], default: [] },
 
-  // Contexte/instructions libres donnés à l'IA (Gemini) pour cette catégorie,
-  // utilisés quand le staff clique sur "Question IA" dans un ticket.
+  // Contexte/instructions libres donnés à l'IA (Gemini) pour cette catégorie.
   aiContext: { type: String, default: '' },
+
+  // Si activé, l'IA agit automatiquement juste après la création du ticket
+  // (avant même que le staff n'intervienne), en tenant compte des réponses au formulaire.
+  aiAutoRespond: { type: Boolean, default: false },
+
+  // Droits de l'IA pour cette catégorie précise.
+  aiPermissions: { type: AiPermissionsSchema, default: () => ({}) },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Category', CategorySchema);

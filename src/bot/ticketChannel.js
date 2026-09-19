@@ -5,7 +5,7 @@ const Category = require('../models/Category');
 const Ticket = require('../models/Ticket');
 const { translateText } = require('./translate');
 const { isStaffMember } = require('./permissions');
-const { generateFollowUpQuestion } = require('./ai');
+const { generateFollowUpAction } = require('./ai');
 const {
   buildTicketPanel,
   buildTextContainer,
@@ -140,11 +140,23 @@ async function handleRedirectSelect(interaction) {
     return;
   }
 
+  await performRedirect(ticket, newCategory, {
+    actorLabel: interaction.member?.displayName || interaction.user.username,
+  });
+
+  await interaction.update(buildSimpleContainerMessage(`✅ Ticket redirigé vers "${newCategory.name}".`, { ephemeral: true })).catch(() => {});
+}
+
+/**
+ * Logique centrale de redirection, réutilisée par le bouton staff et par l'IA.
+ * actorLabel = qui/quoi a décidé (nom du staff, ou "🤖 IA"). note = raison optionnelle affichée en salon.
+ */
+async function performRedirect(ticket, newCategory, { actorLabel = 'Staff', note = null } = {}) {
+  const oldCategory = await Category.findById(ticket.categoryId);
   const channel = await client.channels.fetch(ticket.channelId).catch(() => null);
   const guild = channel?.guild;
 
   if (channel && guild) {
-    // Recalcule les permissions : retire l'accès à l'ancien rôle staff, donne accès au nouveau.
     if (oldCategory?.staffRoleId && oldCategory.staffRoleId !== newCategory.staffRoleId) {
       await channel.permissionOverwrites.delete(oldCategory.staffRoleId).catch(() => {});
     }
@@ -154,7 +166,6 @@ async function handleRedirectSelect(interaction) {
       }).catch(() => {});
     }
 
-    // Renomme le salon en gardant le même numéro de ticket, avec le préfixe de la nouvelle catégorie.
     const { buildChannelName } = require('./ticketFlow');
     const newName = buildChannelName(newCategory.ticketNameFormat, ticket.username, ticket.ticketNumber, newCategory.key);
     await channel.setName(newName).catch(() => {});
@@ -169,25 +180,22 @@ async function handleRedirectSelect(interaction) {
 
   const user = await client.users.fetch(ticket.userId).catch(() => null);
 
-  // Contexte pour l'utilisateur : sa demande a changé de catégorie.
   if (user) {
     const dm = await user.createDM().catch(() => null);
     if (dm) await dm.send(buildRedirectNotifyMessage(ticket.language, newCategory.name)).catch(() => {});
   }
 
-  // Rafraîchit le panneau du ticket dans le salon.
   if (channel) {
+    const lines = [`🔀 Ticket redirigé vers **${newCategory.name}** par ${actorLabel}.`];
+    if (note) lines.push(note);
+    await channel.send(buildSimpleContainerMessage(lines)).catch(() => {});
+
     const panel = buildTicketPanel({
       ticket, category: newCategory, user: user || { id: ticket.userId, tag: ticket.username },
       claimedTag: ticket.claimedByTag, closed: false, pingRoleId: newCategory.staffRoleId,
     });
-    await channel.send(buildSimpleContainerMessage(
-      `🔀 Ticket redirigé vers **${newCategory.name}** par ${interaction.member?.displayName || interaction.user.username}.`
-    )).catch(() => {});
     await channel.send({ ...panel, allowedMentions: { roles: newCategory.staffRoleId ? [newCategory.staffRoleId] : [] } }).catch(() => {});
   }
-
-  await interaction.update(buildSimpleContainerMessage(`✅ Ticket redirigé vers "${newCategory.name}".`, { ephemeral: true })).catch(() => {});
 }
 
 /** Bouton "Forcer le rappel d'inactivité" : envoie le rappel tout de suite, sans attendre le délai. */
@@ -234,7 +242,72 @@ async function sendInactivityReminder(ticket, category) {
   await ticket.save();
 }
 
-/** Bouton "Question IA" : Gemini propose une question de suivi à partir du contexte de la catégorie. */
+/** Récupère les autres catégories actives (pour que l'IA puisse choisir où rediriger). */
+async function fetchOtherCategoriesForAi(category) {
+  if (!category?.aiPermissions?.canRedirect) return [];
+  return Category.find({ active: true, _id: { $ne: category._id } }).select('key name aiContext');
+}
+
+/** Récupère les derniers messages du salon, formatés simplement pour le prompt IA. */
+async function fetchRecentMessagesForAi(channelId, limit = 12) {
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  if (!channel) return { channel: null, recentMessages: [] };
+  const fetched = await channel.messages.fetch({ limit }).catch(() => new Map());
+  const recentMessages = [...fetched.values()]
+    .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+    .filter((m) => m.content?.trim())
+    .map((m) => `${m.author?.bot ? 'Bot' : (m.member?.displayName || m.author?.username || 'user')}: ${m.content}`);
+  return { channel, recentMessages };
+}
+
+/** Envoie en DM la question que l'IA a choisi de poser, et note l'action en salon. */
+async function sendAiQuestion(ticket, question, channel) {
+  const user = await client.users.fetch(ticket.userId).catch(() => null);
+  if (user) {
+    const dm = await user.createDM().catch(() => null);
+    if (dm) await dm.send(buildAiQuestionMessage(question)).catch(() => {});
+  }
+  if (channel) {
+    await channel.send(buildSimpleContainerMessage(`🤖 Question envoyée à l'utilisateur :\n> ${question}`)).catch(() => {});
+  }
+  ticket.lastActivityAt = new Date();
+  ticket.inactivityWarnedAt = null;
+  await ticket.save();
+  return `Question envoyée : ${question}`;
+}
+
+/** Applique le résultat retourné par Gemini (question posée, ou redirection décidée). */
+async function applyAiResult(result, ticket, category, channel) {
+  if (result.type === 'action' && result.name === 'redirect_ticket') {
+    const newCategory = await Category.findOne({ key: result.args.category_key, active: true });
+    if (!newCategory) {
+      if (channel) {
+        await channel.send(buildSimpleContainerMessage(
+          `🤖 L'IA a proposé une redirection vers une catégorie introuvable ("${result.args.category_key}").`
+        )).catch(() => {});
+      }
+      return 'Redirection invalide proposée par l\'IA (catégorie introuvable).';
+    }
+    await performRedirect(ticket, newCategory, {
+      actorLabel: '🤖 IA',
+      note: result.args.reason ? `Raison donnée par l'IA : ${result.args.reason}` : null,
+    });
+    return `Redirigé vers "${newCategory.name}" par l'IA.${result.args.reason ? ' ' + result.args.reason : ''}`;
+  }
+
+  if (result.type === 'action' && result.name === 'ask_question') {
+    return sendAiQuestion(ticket, result.args.question, channel);
+  }
+
+  if (result.type === 'text') {
+    // Repli : le modèle a répondu en texte libre plutôt qu'en appelant un outil.
+    return sendAiQuestion(ticket, result.text, channel);
+  }
+
+  return 'L\'IA n\'a proposé aucune action exploitable.';
+}
+
+/** Bouton "Question IA" : déclenché manuellement par le staff dans le salon du ticket. */
 async function handleAiFollowUp(interaction, ticketId) {
   const ticket = await Ticket.findById(ticketId);
   if (!ticket || ticket.status !== 'open') {
@@ -246,47 +319,74 @@ async function handleAiFollowUp(interaction, ticketId) {
     await interaction.reply(buildSimpleContainerMessage('Tu n\'as pas la permission de faire ça.', { ephemeral: true })).catch(() => {});
     return;
   }
+  if (!category.aiPermissions?.canAskQuestions && !category.aiPermissions?.canRedirect) {
+    await interaction.reply(buildSimpleContainerMessage(
+      'Aucune permission IA activée pour cette catégorie. Configure-les dans le dashboard (onglet Catégories).',
+      { ephemeral: true }
+    )).catch(() => {});
+    return;
+  }
 
   await interaction.deferReply({ flags: CV2_EPHEMERAL_FLAGS }).catch(() => interaction.deferReply({ ephemeral: true }).catch(() => {}));
 
-  const channel = await client.channels.fetch(ticket.channelId).catch(() => null);
-  let recentMessages = [];
-  if (channel) {
-    const fetched = await channel.messages.fetch({ limit: 12 }).catch(() => new Map());
-    recentMessages = [...fetched.values()]
-      .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
-      .filter((m) => m.content?.trim())
-      .map((m) => `${m.author?.bot ? 'Bot' : (m.member?.displayName || m.author?.username || 'user')}: ${m.content}`);
-  }
+  const { channel, recentMessages } = await fetchRecentMessagesForAi(ticket.channelId);
+  const otherCategories = await fetchOtherCategoriesForAi(category);
 
   try {
-    const question = await generateFollowUpQuestion({
-      categoryContext: category?.aiContext,
+    const result = await generateFollowUpAction({
+      categoryName: category.name,
+      categoryContext: category.aiContext,
       answers: ticket.answers,
       language: ticket.language,
       recentMessages,
+      permissions: category.aiPermissions,
+      otherCategories,
     });
 
-    const user = await client.users.fetch(ticket.userId).catch(() => null);
-    if (user) {
-      const dm = await user.createDM().catch(() => null);
-      if (dm) await dm.send(buildAiQuestionMessage(question)).catch(() => {});
-    }
-
-    if (channel) {
-      await channel.send(buildSimpleContainerMessage(
-        `🤖 Question générée par l'IA et envoyée à l'utilisateur :\n> ${question}`
-      )).catch(() => {});
-    }
-
-    await interaction.editReply(buildSimpleContainerMessage(`✅ Question envoyée :\n> ${question}`)).catch(() => {});
+    const summary = await applyAiResult(result, ticket, category, channel);
+    await interaction.editReply(buildSimpleContainerMessage(`✅ ${summary}`)).catch(() => {});
   } catch (err) {
     console.error('[ai] erreur :', err.message);
     let msg = `❌ Erreur IA : ${err.message}`;
     if (err.code === 'missing_api_key') {
       msg = '❌ Aucune clé Gemini configurée. Ajoute GEMINI_API_KEY dans les variables d\'environnement (voir README).';
+    } else if (err.code === 'no_permissions') {
+      msg = '❌ Aucune permission IA activée pour cette catégorie.';
     }
     await interaction.editReply(buildSimpleContainerMessage(msg)).catch(() => {});
+  }
+}
+
+/**
+ * "L'IA répond en premier" : déclenché automatiquement juste après la création
+ * du ticket si la catégorie a `aiAutoRespond` activé. Aucune interaction Discord
+ * ici (ce n'est pas un clic de bouton), donc pas de reply/deferReply.
+ */
+async function triggerAiAutoRespond(ticket, category) {
+  if (!category?.aiAutoRespond) return;
+  if (!category.aiPermissions?.canAskQuestions && !category.aiPermissions?.canRedirect) return;
+
+  const { channel, recentMessages } = await fetchRecentMessagesForAi(ticket.channelId);
+  const otherCategories = await fetchOtherCategoriesForAi(category);
+
+  try {
+    const result = await generateFollowUpAction({
+      categoryName: category.name,
+      categoryContext: category.aiContext,
+      answers: ticket.answers,
+      language: ticket.language,
+      recentMessages,
+      permissions: category.aiPermissions,
+      otherCategories,
+    });
+    await applyAiResult(result, ticket, category, channel);
+  } catch (err) {
+    console.error('[ai:auto] erreur :', err.message);
+    if (channel) {
+      await channel.send(buildSimpleContainerMessage(
+        `🤖 L'IA n'a pas pu répondre automatiquement (${err.message}).`
+      )).catch(() => {});
+    }
   }
 }
 
@@ -461,6 +561,7 @@ module.exports = {
   handleRedirectSelect,
   handleForceRemind,
   handleAiFollowUp,
+  triggerAiAutoRespond,
   handleRating,
   startAutoCloseChecker,
 };
