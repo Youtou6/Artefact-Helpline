@@ -148,6 +148,10 @@ function buildTicketPanel({ ticket, category, user, claimedTag, closed, pingRole
 
   lines.push(claimedTag ? `🟡 Pris en charge par **${claimedTag}**` : '⚪ Non pris en charge');
 
+  if (!closed && ticket.aiActive) {
+    lines.push('🤖 L\'IA gère actuellement cette conversation (elle répondra tant qu\'un humain n\'intervient pas ou qu\'elle n\'a pas terminé).');
+  }
+
   if (!closed && ticket.inactivityWarnedAt) {
     lines.push(`🔔 Rappel d'inactivité envoyé <t:${Math.floor(new Date(ticket.inactivityWarnedAt).getTime() / 1000)}:R>`);
   }
@@ -181,7 +185,7 @@ function buildTicketPanel({ ticket, category, user, claimedTag, closed, pingRole
         .setEmoji('⏰'),
       new ButtonBuilder()
         .setCustomId(`ticket:ai:${ticket._id}`)
-        .setLabel('Question IA')
+        .setLabel('Rappeler l\'IA')
         .setStyle(ButtonStyle.Secondary)
         .setEmoji('🤖')
     );

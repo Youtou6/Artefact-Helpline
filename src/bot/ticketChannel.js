@@ -22,6 +22,10 @@ const {
   CV2_EPHEMERAL_FLAGS,
 } = require('./components');
 
+// Garde-fou : nombre max de tours IA déclenchés automatiquement (à chaque réponse
+// utilisateur) sans intervention humaine, pour éviter une boucle qui ne s'arrête jamais.
+const MAX_AI_AUTO_TURNS = 8;
+
 /** Marque une activité sur le ticket et annule un éventuel rappel d'inactivité en cours. */
 async function touchTicket(ticket) {
   ticket.lastActivityAt = new Date();
@@ -44,6 +48,23 @@ async function forwardDmToChannel(ticket, message) {
 
   await channel.send({ content: content || '\u200b', files: attachments }).catch(() => {});
   await touchTicket(ticket);
+
+  // Si l'IA gère actuellement la conversation, elle enchaîne automatiquement.
+  if (ticket.aiActive) {
+    const category = await Category.findById(ticket.categoryId);
+    if (category) {
+      try {
+        await runAiTurn(ticket, category, { isAutoLoop: true });
+      } catch (err) {
+        console.error('[ai:loop] erreur :', err.message);
+        await channel.send(buildSimpleContainerMessage(
+          `🤖 Erreur IA pendant la conversation automatique (${err.message}). Un humain devrait prendre le relais.`
+        )).catch(() => {});
+        ticket.aiActive = false;
+        await ticket.save();
+      }
+    }
+  }
 }
 
 /** Message staff dans le salon -> relayé en DM à l'utilisateur. */
@@ -65,14 +86,24 @@ async function relayStaffMessage(message, ticket, category) {
   const content = `${prefix}\n${text}`.trim();
 
   await dmChannel.send({ content: content || '\u200b', files: attachments }).catch(() => {});
+
+  // Un humain vient de répondre : l'IA cède la main si elle était active.
+  const wasAiActive = ticket.aiActive;
+  ticket.aiActive = false;
   await touchTicket(ticket);
+
+  if (wasAiActive) {
+    await message.channel.send(buildSimpleContainerMessage(
+      '🤖 L\'IA cède la main : un membre du staff vient de répondre.'
+    )).catch(() => {});
+  }
 }
 
 /** Bouton "Prendre en charge" */
 async function handleClaim(interaction, ticketId) {
   const ticket = await Ticket.findById(ticketId);
   if (!ticket || ticket.status !== 'open') {
-    await interaction.reply({ ...buildSimpleContainerMessage('Ce ticket n\'existe plus ou est déjà fermé.', { ephemeral: true }) }).catch(() => {});
+    await interaction.reply(buildSimpleContainerMessage('Ce ticket n\'existe plus ou est déjà fermé.', { ephemeral: true })).catch(() => {});
     return;
   }
   const category = await Category.findById(ticket.categoryId);
@@ -96,7 +127,6 @@ async function handleClaim(interaction, ticketId) {
   });
   await interaction.update(panel).catch(() => {});
 
-  // Contexte pour l'utilisateur : qui s'occupe de son ticket désormais.
   if (user) {
     const dm = await user.createDM().catch(() => null);
     if (dm) await dm.send(buildClaimNotifyMessage(ticket.language, ticket.claimedByTag, category.anonymousReplies)).catch(() => {});
@@ -133,13 +163,13 @@ async function handleRedirectSelect(interaction) {
 
   const ticket = await Ticket.findById(ticketId);
   const newCategory = await Category.findById(newCategoryId);
-  const oldCategory = ticket ? await Category.findById(ticket.categoryId) : null;
 
   if (!ticket || ticket.status !== 'open' || !newCategory) {
     await interaction.update(buildSimpleContainerMessage('Ce ticket ou cette catégorie n\'existe plus.', { ephemeral: true })).catch(() => {});
     return;
   }
 
+  ticket.aiActive = false;
   await performRedirect(ticket, newCategory, {
     actorLabel: interaction.member?.displayName || interaction.user.username,
   });
@@ -242,6 +272,8 @@ async function sendInactivityReminder(ticket, category) {
   await ticket.save();
 }
 
+// ══════════════════════════════ ASSISTANT IA ══════════════════════════════
+
 /** Récupère les autres catégories actives (pour que l'IA puisse choisir où rediriger). */
 async function fetchOtherCategoriesForAi(category) {
   if (!category?.aiPermissions?.canRedirect) return [];
@@ -249,7 +281,7 @@ async function fetchOtherCategoriesForAi(category) {
 }
 
 /** Récupère les derniers messages du salon, formatés simplement pour le prompt IA. */
-async function fetchRecentMessagesForAi(channelId, limit = 12) {
+async function fetchRecentMessagesForAi(channelId, limit = 16) {
   const channel = await client.channels.fetch(channelId).catch(() => null);
   if (!channel) return { channel: null, recentMessages: [] };
   const fetched = await channel.messages.fetch({ limit }).catch(() => new Map());
@@ -260,8 +292,8 @@ async function fetchRecentMessagesForAi(channelId, limit = 12) {
   return { channel, recentMessages };
 }
 
-/** Envoie en DM la question que l'IA a choisi de poser, et note l'action en salon. */
-async function sendAiQuestion(ticket, question, channel) {
+/** Envoie en DM la question/le message que l'IA a choisi, et note l'action en salon. */
+async function sendAiQuestionDm(ticket, question, channel) {
   const user = await client.users.fetch(ticket.userId).catch(() => null);
   if (user) {
     const dm = await user.createDM().catch(() => null);
@@ -272,15 +304,51 @@ async function sendAiQuestion(ticket, question, channel) {
   }
   ticket.lastActivityAt = new Date();
   ticket.inactivityWarnedAt = null;
-  await ticket.save();
-  return `Question envoyée : ${question}`;
 }
 
-/** Applique le résultat retourné par Gemini (question posée, ou redirection décidée). */
+/** Poste le fichier récapitulatif de l'IA dans le salon, une fois sa collecte terminée. */
+async function sendAiSummaryFile(ticket, category, summaryText, channel) {
+  if (!channel) return;
+  const header = [
+    `Résumé IA — Ticket #${ticket.ticketNumber} — ${category?.name || ticket.categoryKey}`,
+    `Utilisateur Discord : ${ticket.username} (${ticket.userId})`,
+    `Généré le : ${new Date().toLocaleString('fr-FR')}`,
+    '─'.repeat(60),
+    '',
+  ];
+  const body = [...header, summaryText?.trim() || '(résumé vide)'].join('\n');
+  const buffer = Buffer.from(body, 'utf-8');
+
+  await channel.send({
+    ...buildSimpleContainerMessage('🤖 L\'IA a terminé sa collecte d\'informations pour ce ticket. Résumé ci-joint :'),
+    files: [new AttachmentBuilder(buffer, { name: `ia-resume-ticket-${ticket.ticketNumber}.txt` })],
+  }).catch(() => {});
+}
+
+/** Notifie le salon qu'un humain doit prendre le relais (ping du rôle staff si défini). */
+async function notifyHumanNeeded(ticket, category, reason, channel) {
+  if (!channel) return;
+  const lines = [];
+  if (category?.staffRoleId) lines.push(`<@&${category.staffRoleId}>`);
+  lines.push(`🤖 L'IA a besoin d'un humain ici${reason ? ` : ${reason}` : '.'}`);
+
+  await channel.send({
+    ...buildSimpleContainerMessage(lines),
+    allowedMentions: category?.staffRoleId ? { roles: [category.staffRoleId] } : undefined,
+  }).catch(() => {});
+}
+
+/**
+ * Applique le résultat retourné par Gemini et met à jour l'état "IA active" du ticket
+ * en conséquence : reste active si elle pose une question, se coupe sinon (fin, humain
+ * requis, ou redirection).
+ */
 async function applyAiResult(result, ticket, category, channel) {
   if (result.type === 'action' && result.name === 'redirect_ticket') {
     const newCategory = await Category.findOne({ key: result.args.category_key, active: true });
+    ticket.aiActive = false;
     if (!newCategory) {
+      await ticket.save();
       if (channel) {
         await channel.send(buildSimpleContainerMessage(
           `🤖 L'IA a proposé une redirection vers une catégorie introuvable ("${result.args.category_key}").`
@@ -288,6 +356,7 @@ async function applyAiResult(result, ticket, category, channel) {
       }
       return 'Redirection invalide proposée par l\'IA (catégorie introuvable).';
     }
+    await ticket.save();
     await performRedirect(ticket, newCategory, {
       actorLabel: '🤖 IA',
       note: result.args.reason ? `Raison donnée par l'IA : ${result.args.reason}` : null,
@@ -295,19 +364,78 @@ async function applyAiResult(result, ticket, category, channel) {
     return `Redirigé vers "${newCategory.name}" par l'IA.${result.args.reason ? ' ' + result.args.reason : ''}`;
   }
 
+  if (result.type === 'action' && result.name === 'finish_collection') {
+    await sendAiSummaryFile(ticket, category, result.args.summary, channel);
+    ticket.aiActive = false;
+    await ticket.save();
+    return 'Collecte terminée, résumé envoyé au staff.';
+  }
+
+  if (result.type === 'action' && result.name === 'request_human') {
+    await notifyHumanNeeded(ticket, category, result.args.reason, channel);
+    ticket.aiActive = false;
+    await ticket.save();
+    return `Un humain est nécessaire : ${result.args.reason || 'raison non précisée'}.`;
+  }
+
   if (result.type === 'action' && result.name === 'ask_question') {
-    return sendAiQuestion(ticket, result.args.question, channel);
+    await sendAiQuestionDm(ticket, result.args.question, channel);
+    ticket.aiActive = true;
+    await ticket.save();
+    return `Question envoyée : ${result.args.question}`;
   }
 
   if (result.type === 'text') {
     // Repli : le modèle a répondu en texte libre plutôt qu'en appelant un outil.
-    return sendAiQuestion(ticket, result.text, channel);
+    await sendAiQuestionDm(ticket, result.text, channel);
+    ticket.aiActive = true;
+    await ticket.save();
+    return `Question envoyée : ${result.text}`;
   }
 
+  ticket.aiActive = false;
+  await ticket.save();
   return 'L\'IA n\'a proposé aucune action exploitable.';
 }
 
-/** Bouton "Question IA" : déclenché manuellement par le staff dans le salon du ticket. */
+/**
+ * Un tour de l'IA : rassemble le contexte, appelle Gemini, applique le résultat.
+ * isAutoLoop = true uniquement quand c'est déclenché automatiquement par une réponse
+ * utilisateur pendant que l'IA est déjà active (soumis au garde-fou anti-boucle).
+ * Un appel manuel (bouton) ou la toute première réponse automatique à la création
+ * du ticket ne sont jamais limités.
+ */
+async function runAiTurn(ticket, category, { isAutoLoop = false } = {}) {
+  const { channel, recentMessages } = await fetchRecentMessagesForAi(ticket.channelId);
+
+  if (isAutoLoop && ticket.aiTurnCount >= MAX_AI_AUTO_TURNS) {
+    ticket.aiActive = false;
+    await ticket.save();
+    await notifyHumanNeeded(ticket, category, 'limite de tours automatiques atteinte', channel);
+    return 'Limite de tours IA atteinte, un humain doit prendre le relais.';
+  }
+
+  const otherCategories = await fetchOtherCategoriesForAi(category);
+
+  ticket.aiTurnCount = (ticket.aiTurnCount || 0) + 1;
+  await ticket.save();
+
+  const result = await generateFollowUpAction({
+    categoryName: category.name,
+    categoryContext: category.aiContext,
+    infoToCollect: category.aiInfoToCollect,
+    discordUsername: ticket.username,
+    answers: ticket.answers,
+    language: ticket.language,
+    recentMessages,
+    permissions: category.aiPermissions,
+    otherCategories,
+  });
+
+  return applyAiResult(result, ticket, category, channel);
+}
+
+/** Bouton "Rappeler l'IA" : déclenché manuellement par le staff, y compris si l'IA était déjà partie. */
 async function handleAiFollowUp(interaction, ticketId) {
   const ticket = await Ticket.findById(ticketId);
   if (!ticket || ticket.status !== 'open') {
@@ -319,39 +447,20 @@ async function handleAiFollowUp(interaction, ticketId) {
     await interaction.reply(buildSimpleContainerMessage('Tu n\'as pas la permission de faire ça.', { ephemeral: true })).catch(() => {});
     return;
   }
-  if (!category.aiPermissions?.canAskQuestions && !category.aiPermissions?.canRedirect) {
-    await interaction.reply(buildSimpleContainerMessage(
-      'Aucune permission IA activée pour cette catégorie. Configure-les dans le dashboard (onglet Catégories).',
-      { ephemeral: true }
-    )).catch(() => {});
-    return;
-  }
 
   await interaction.deferReply({ flags: CV2_EPHEMERAL_FLAGS }).catch(() => interaction.deferReply({ ephemeral: true }).catch(() => {}));
 
-  const { channel, recentMessages } = await fetchRecentMessagesForAi(ticket.channelId);
-  const otherCategories = await fetchOtherCategoriesForAi(category);
+  // Un rappel manuel repart avec un budget de tours frais.
+  ticket.aiTurnCount = 0;
 
   try {
-    const result = await generateFollowUpAction({
-      categoryName: category.name,
-      categoryContext: category.aiContext,
-      answers: ticket.answers,
-      language: ticket.language,
-      recentMessages,
-      permissions: category.aiPermissions,
-      otherCategories,
-    });
-
-    const summary = await applyAiResult(result, ticket, category, channel);
+    const summary = await runAiTurn(ticket, category, { isAutoLoop: false });
     await interaction.editReply(buildSimpleContainerMessage(`✅ ${summary}`)).catch(() => {});
   } catch (err) {
     console.error('[ai] erreur :', err.message);
     let msg = `❌ Erreur IA : ${err.message}`;
     if (err.code === 'missing_api_key') {
       msg = '❌ Aucune clé Gemini configurée. Ajoute GEMINI_API_KEY dans les variables d\'environnement (voir README).';
-    } else if (err.code === 'no_permissions') {
-      msg = '❌ Aucune permission IA activée pour cette catégorie.';
     }
     await interaction.editReply(buildSimpleContainerMessage(msg)).catch(() => {});
   }
@@ -364,24 +473,12 @@ async function handleAiFollowUp(interaction, ticketId) {
  */
 async function triggerAiAutoRespond(ticket, category) {
   if (!category?.aiAutoRespond) return;
-  if (!category.aiPermissions?.canAskQuestions && !category.aiPermissions?.canRedirect) return;
-
-  const { channel, recentMessages } = await fetchRecentMessagesForAi(ticket.channelId);
-  const otherCategories = await fetchOtherCategoriesForAi(category);
 
   try {
-    const result = await generateFollowUpAction({
-      categoryName: category.name,
-      categoryContext: category.aiContext,
-      answers: ticket.answers,
-      language: ticket.language,
-      recentMessages,
-      permissions: category.aiPermissions,
-      otherCategories,
-    });
-    await applyAiResult(result, ticket, category, channel);
+    await runAiTurn(ticket, category, { isAutoLoop: false });
   } catch (err) {
     console.error('[ai:auto] erreur :', err.message);
+    const channel = await client.channels.fetch(ticket.channelId).catch(() => null);
     if (channel) {
       await channel.send(buildSimpleContainerMessage(
         `🤖 L'IA n'a pas pu répondre automatiquement (${err.message}).`
@@ -389,6 +486,8 @@ async function triggerAiAutoRespond(ticket, category) {
     }
   }
 }
+
+// ═══════════════════════════ FIN ASSISTANT IA ═════════════════════════════
 
 /** Bouton "Fermer le ticket" ou fermeture automatique (reason = 'staff' | 'inactivity'). */
 async function handleClose(interaction, ticketId, { reason = 'staff' } = {}) {
@@ -439,6 +538,7 @@ async function handleClose(interaction, ticketId, { reason = 'staff' } = {}) {
   }
 
   ticket.status = 'closed';
+  ticket.aiActive = false;
   ticket.closedAt = new Date();
   ticket.closedBy = auto ? 'auto' : (interaction?.user?.id || 'unknown');
   ticket.closeReason = reason;
@@ -472,7 +572,6 @@ async function handleRating(interaction, rating, ticketId) {
 
   await interaction.update(buildRatingThanksMessage(ticket.language, rating)).catch(() => {});
 
-  // Contexte pour le staff : la note tombe dans le salon des logs.
   const settings = await Settings.getSingleton();
   if (settings.logChannelId) {
     const logChannel = await client.channels.fetch(settings.logChannelId).catch(() => null);

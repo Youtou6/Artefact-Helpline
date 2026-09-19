@@ -256,8 +256,14 @@ function renderCategories(roles) {
       <div class="hint" style="margin-top:-8px; margin-bottom:14px;">Ex : 1440 puis 720 = rappel après 24h d'inactivité, fermeture 12h plus tard si toujours rien.</div>
 
       <div class="field">
-        <label>Contexte pour l'IA (optionnel) — utilisé par le bouton "Question IA" et la réponse automatique</label>
+        <label>Contexte pour l'IA (optionnel) — utilisé par le bouton "Rappeler l'IA" et la réponse automatique</label>
         <textarea data-field="aiContext" rows="3" placeholder="Ex : Cette catégorie sert aux commandes de build Roblox sur mesure. Pose des questions sur le budget, le style, la taille de la map, la deadline, les références visuelles.">${escapeHtml(cat.aiContext || '')}</textarea>
+      </div>
+
+      <div class="field">
+        <label>Informations à récupérer avant de terminer (séparées par des virgules)</label>
+        <input data-field="aiInfoToCollect" value="${escapeHtml((cat.aiInfoToCollect || []).join(', '))}" placeholder="Ex : Budget, Style souhaité, Taille de la map, Deadline, Références visuelles" />
+        <div class="hint">Une fois tout récupéré (ou si rien n'est précisé ici et qu'elle juge avoir assez demandé), l'IA envoie un fichier récapitulatif dans le salon et s'arrête.</div>
       </div>
 
       <div class="checkbox-row field">
@@ -276,6 +282,7 @@ function renderCategories(roles) {
           <label style="margin:0;">Peut rediriger vers une autre catégorie</label>
         </div>
       </div>
+      <div class="hint" style="margin-top:-8px; margin-bottom:14px;">Dans tous les cas, l'IA peut toujours terminer sa collecte (fichier récap envoyé) ou passer la main à un humain — ce n'est jamais bloqué.</div>
 
       <hr class="divider" />
       <label>Questions posées avant création du ticket</label>
@@ -356,6 +363,7 @@ document.getElementById('categoriesList').addEventListener('click', async (e) =>
       inactivityWarningMinutes: Number(get('inactivityWarningMinutes').value) || 0,
       inactivityCloseMinutes: Number(get('inactivityCloseMinutes').value) || 0,
       aiContext: get('aiContext').value.trim(),
+      aiInfoToCollect: get('aiInfoToCollect').value.split(',').map((s) => s.trim()).filter(Boolean),
       aiAutoRespond: get('aiAutoRespond').checked,
       aiPermissions: {
         canAskQuestions: get('aiCanAskQuestions').checked,

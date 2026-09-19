@@ -128,15 +128,18 @@ Quand tu es prêt : invite le bot sur ton vrai serveur, va dans **Paramètres**,
 - **Inactivité en 2 temps** (configurable par catégorie, dans le dashboard) : après *X* minutes sans activité, un rappel est envoyé à l'utilisateur et noté dans le salon ; si toujours rien après encore *Y* minutes, le ticket se ferme automatiquement. Un bouton **"Forcer le rappel"** sur le panneau du ticket permet de déclencher ce rappel manuellement, à tout moment.
 - **Redirection de ticket** : bouton **"Rediriger"** sur le panneau du ticket → menu déroulant des autres catégories actives. Le salon est renommé, les permissions du rôle staff mises à jour, et l'utilisateur prévenu.
 - **Questions avancées** : dans l'éditeur de catégorie, chaque question a désormais un type — *Texte libre*, *Menu déroulant* (avec ses options séparées par des virgules) ou *Fichier requis* (le bot exige une pièce jointe avant de continuer).
-- **Assistant IA (Gemini, gratuit)** : chaque catégorie a un champ **"Contexte pour l'IA"** dans le dashboard (ex : *"Cette catégorie sert aux commandes de build Roblox sur mesure, demande le budget, le style, la deadline..."*), et deux **droits** activables séparément :
-  - *Peut poser des questions de suivi* : l'IA formule une question pertinente et l'envoie en DM.
-  - *Peut rediriger vers une autre catégorie* : si la demande ne correspond clairement pas à la catégorie actuelle, l'IA peut déplacer le ticket elle-même (salon renommé, permissions mises à jour, utilisateur prévenu — exactement comme une redirection manuelle, avec la raison notée en salon).
-  
-  Deux façons de la déclencher :
-  - **Manuellement** : bouton **"Question IA"** sur le panneau du ticket, à tout moment.
-  - **Automatiquement** : option **"L'IA répond en premier"** par catégorie — dès la création du ticket, avant même que le staff n'intervienne, l'IA analyse les réponses au formulaire et agit (pose une question ou redirige si besoin).
+- **Assistant IA conversationnel (Gemini, gratuit)** : chaque catégorie a :
+  - un champ **"Contexte pour l'IA"** (instructions libres),
+  - une liste **"Informations à récupérer"** (ex : *Budget, Style souhaité, Taille de la map, Deadline*),
+  - deux **droits** activables séparément : *peut poser des questions de suivi* et *peut rediriger vers une autre catégorie*.
 
-  Techniquement, l'IA ne "décide" jamais dans le vide : elle choisit parmi les actions explicitement autorisées pour la catégorie (function calling Gemini), donc désactiver un droit dans le dashboard le rend réellement impossible à utiliser, pas juste déconseillé.
+  Une fois lancée (via l'option **"L'IA répond en premier"** à la création du ticket, ou manuellement avec le bouton **"Rappeler l'IA"**), l'IA **continue seule** la conversation à chaque réponse de l'utilisateur — elle ne s'arrête que dans deux cas :
+  - elle a récupéré tout ce qu'il fallait → elle **envoie un fichier `.txt` récapitulatif** dans le salon avec toutes les infos rassemblées, et cède la main ;
+  - elle juge qu'un humain doit intervenir (demande ambiguë, hors-sujet, client qui demande explicitement un humain...) → elle le signale clairement dans le salon (avec ping du rôle staff) et cède la main.
+
+  Elle a aussi accès au **pseudo Discord** du client pour personnaliser ses messages. Si un membre du staff écrit manuellement dans le salon pendant que l'IA est active, elle **cède automatiquement la main** (pas de double réponse). Le bouton **"Rappeler l'IA"** sur le panneau du ticket sert justement à la relancer si elle est déjà partie. Un garde-fou limite à 8 le nombre de tours automatiques enchaînés sans intervention humaine, pour éviter toute boucle infinie.
+
+  Techniquement, l'IA ne "décide" jamais dans le vide : elle choisit parmi les actions explicitement autorisées pour la catégorie (function calling Gemini) — désactiver un droit dans le dashboard le rend réellement impossible à utiliser, pas juste déconseillé. Terminer ou passer la main à un humain reste en revanche toujours possible, quels que soient les droits cochés.
 
 ### Configurer l'IA (Gemini, gratuit)
 

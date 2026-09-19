@@ -124,7 +124,7 @@ router.post('/categories', async (req, res) => {
 
 router.put('/categories/:id', async (req, res) => {
   try {
-    const allowed = ['name', 'emoji', 'staffRoleId', 'ticketNameFormat', 'anonymousReplies', 'inactivityWarningMinutes', 'inactivityCloseMinutes', 'order', 'active', 'questions', 'aiContext', 'aiAutoRespond', 'aiPermissions'];
+    const allowed = ['name', 'emoji', 'staffRoleId', 'ticketNameFormat', 'anonymousReplies', 'inactivityWarningMinutes', 'inactivityCloseMinutes', 'order', 'active', 'questions', 'aiContext', 'aiInfoToCollect', 'aiAutoRespond', 'aiPermissions'];
     const update = {};
     for (const key of allowed) {
       if (req.body[key] !== undefined) update[key] = req.body[key];

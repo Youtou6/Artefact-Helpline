@@ -45,6 +45,11 @@ const CategorySchema = new Schema({
   // Contexte/instructions libres donnés à l'IA (Gemini) pour cette catégorie.
   aiContext: { type: String, default: '' },
 
+  // Liste des informations que l'IA doit essayer de récupérer via la conversation
+  // (en plus des questions fixes du formulaire). Ex : "Budget, Style, Deadline".
+  // Une fois tout récupéré, l'IA envoie un fichier récapitulatif côté staff et s'arrête.
+  aiInfoToCollect: { type: [String], default: [] },
+
   // Si activé, l'IA agit automatiquement juste après la création du ticket
   // (avant même que le staff n'intervienne), en tenant compte des réponses au formulaire.
   aiAutoRespond: { type: Boolean, default: false },

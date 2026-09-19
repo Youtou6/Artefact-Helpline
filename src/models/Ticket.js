@@ -34,6 +34,13 @@ const TicketSchema = new Schema({
   // Suivi de l'inactivité en 2 temps. Remis à null dès qu'il y a une nouvelle activité.
   inactivityWarnedAt: { type: Date, default: null },
 
+  // L'IA est-elle actuellement "aux commandes" de la conversation pour ce ticket ?
+  // true tant qu'elle continue de poser des questions ; repassée à false dès qu'elle
+  // termine sa collecte, qu'elle juge un humain nécessaire, ou qu'un staff humain écrit.
+  aiActive: { type: Boolean, default: false },
+  // Compteur de tours IA déclenchés automatiquement (garde-fou anti-boucle infinie).
+  aiTurnCount: { type: Number, default: 0 },
+
   // Note laissée par l'utilisateur après la fermeture (1 à 5), via DM.
   rating: { type: Number, min: 1, max: 5, default: null },
 
