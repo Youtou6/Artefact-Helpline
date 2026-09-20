@@ -132,7 +132,7 @@ async function generateFollowUpAction({ categoryName, categoryContext, infoToCol
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         tools: [{ functionDeclarations }],
-        generationConfig: { temperature: 0.6, maxOutputTokens: 500 },
+        generationConfig: { temperature: 0.6, maxOutputTokens: 800 },
       }),
     }
   );
@@ -141,6 +141,7 @@ async function generateFollowUpAction({ categoryName, categoryContext, infoToCol
     const bodyText = await res.text().catch(() => '');
     const err = new Error(`Gemini API a répondu ${res.status} : ${bodyText.slice(0, 300)}`);
     err.code = 'api_error';
+    err.status = res.status;
     throw err;
   }
 
@@ -156,7 +157,8 @@ async function generateFollowUpAction({ categoryName, categoryContext, infoToCol
   const textPart = parts.find((p) => p.text?.trim());
   if (textPart) return { type: 'text', text: textPart.text.trim() };
 
-  const err = new Error('Réponse vide de Gemini (probablement bloquée par les filtres de sécurité).');
+  const finishReason = data?.candidates?.[0]?.finishReason || data?.promptFeedback?.blockReason;
+  const err = new Error(`Réponse vide de Gemini${finishReason ? ` (raison : ${finishReason})` : ' (probablement bloquée par les filtres de sécurité)'}.`);
   err.code = 'empty_response';
   throw err;
 }

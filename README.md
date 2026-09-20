@@ -161,3 +161,9 @@ Quand tu es prêt : invite le bot sur ton vrai serveur, va dans **Paramètres**,
 ## Support
 
 En cas de souci de déploiement, vérifie en premier les logs Render (onglet **Logs**) — la plupart des erreurs viennent d'une variable d'environnement manquante ou d'une IP non autorisée sur MongoDB Atlas.
+
+### Fiabilité et confidentialité de l'IA
+
+- **Nouvelles tentatives automatiques** : si Gemini échoue de façon transitoire (réponse vide/filtrée, erreur 429/5xx, souci réseau), le bot réessaie automatiquement jusqu'à 2 fois, à environ 1 minute d'intervalle, avec une petite note dans le salon à chaque tentative. Ce n'est qu'après ces essais qu'il bascule sur "un humain est nécessaire". Les erreurs de configuration (clé manquante, modèle introuvable...) ne sont en revanche jamais réessayées, puisque réessayer ne changerait rien.
+- **Transcript complet** : le fichier `.txt` généré à la fermeture capture désormais aussi le texte des messages du bot envoyés en Components V2 (panneau, notices IA, redirections...), qui étaient auparavant invisibles dans le transcript.
+- **Confidentialité vis-à-vis de Google** : le contexte envoyé à Gemini est filtré pour ne contenir QUE ce qui concerne l'utilisateur qui contacte — ses réponses au formulaire, ses propres messages, et les réponses du staff qui lui ont réellement été envoyées (anonymisées si l'option "réponses anonymes" est active pour la catégorie). Le panneau du ticket, les notices internes (redirection, rappel, pings de rôle...) et tout ce qui n'est pas explicitement adressé au client ne partent jamais vers l'API Gemini.

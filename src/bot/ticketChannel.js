@@ -280,16 +280,60 @@ async function fetchOtherCategoriesForAi(category) {
   return Category.find({ active: true, _id: { $ne: category._id } }).select('key name aiContext');
 }
 
-/** Récupère les derniers messages du salon, formatés simplement pour le prompt IA. */
-async function fetchRecentMessagesForAi(channelId, limit = 16) {
+/** Extrait le texte lisible d'un message, y compris quand il est en Components V2 (content brut est alors vide). */
+function extractMessageText(message) {
+  if (message.content?.trim()) return message.content;
+  if (!message.components?.length) return '';
+
+  const out = [];
+  const walk = (components) => {
+    for (const c of components || []) {
+      if (c.content) out.push(c.content); // TextDisplay (type 10)
+      if (c.components?.length) walk(c.components); // Container (17) / Section (9)
+    }
+  };
+  walk(message.components);
+  return out.join('\n');
+}
+
+/**
+ * Récupère les derniers messages du salon pour le prompt IA — filtrés pour ne
+ * contenir QUE la conversation avec le client qui contacte (ses propres messages,
+ * relayés par le bot, et les réponses du staff qui lui ont réellement été envoyées).
+ * Tout le reste (panneau du ticket, notices de redirection/rappel/IA, pings de
+ * rôle, etc.) est volontairement exclu : ce sont des informations internes au
+ * serveur, pas des informations sur l'utilisateur, et elles ne partent jamais
+ * vers l'API Gemini.
+ */
+async function fetchRecentMessagesForAi(channelId, ticket, category, limit = 16) {
   const channel = await client.channels.fetch(channelId).catch(() => null);
   if (!channel) return { channel: null, recentMessages: [] };
-  const fetched = await channel.messages.fetch({ limit }).catch(() => new Map());
-  const recentMessages = [...fetched.values()]
-    .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
-    .filter((m) => m.content?.trim())
-    .map((m) => `${m.author?.bot ? 'Bot' : (m.member?.displayName || m.author?.username || 'user')}: ${m.content}`);
-  return { channel, recentMessages };
+
+  // Sur-échantillonne un peu puisqu'on va filtrer une partie des messages (notices internes).
+  const fetched = await channel.messages.fetch({ limit: Math.min(limit * 3, 100) }).catch(() => new Map());
+  const sorted = [...fetched.values()].sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+
+  const recentMessages = [];
+  for (const m of sorted) {
+    const text = extractMessageText(m).trim();
+    if (!text) continue;
+
+    if (m.author?.bot) {
+      // Uniquement le relais d'un message DM du client (format "**Pseudo**\n...").
+      const match = text.match(/^\*\*(.+?)\*\*\n([\s\S]*)$/);
+      if (match && match[1] === ticket.username) {
+        recentMessages.push(`Customer: ${match[2]}`);
+      }
+      // Tout le reste (panneau, notices IA/redirection/rappel, confirmations) est ignoré.
+      continue;
+    }
+
+    // Message écrit directement par un membre du staff.
+    const label = category?.anonymousReplies ? 'Staff' : (m.member?.displayName || m.author?.username || 'Staff');
+    recentMessages.push(`${label}: ${text}`);
+  }
+
+  return { channel, recentMessages: recentMessages.slice(-limit) };
 }
 
 /** Envoie en DM la question/le message que l'IA a choisi, et note l'action en salon. */
@@ -405,8 +449,37 @@ async function applyAiResult(result, ticket, category, channel) {
  * Un appel manuel (bouton) ou la toute première réponse automatique à la création
  * du ticket ne sont jamais limités.
  */
+const AI_RETRY_DELAY_MS = 60 * 1000; // ~1 minute entre les tentatives
+const AI_MAX_ATTEMPTS = 3; // 1 essai + 2 nouvelles tentatives avant d'abandonner
+
+function isRetryableAiError(err) {
+  if (err.code === 'missing_api_key') return false;
+  if (err.code === 'api_error' && err.status) {
+    // Pas la peine de réessayer une erreur de config (modèle inconnu, requête invalide...).
+    return err.status === 429 || err.status >= 500;
+  }
+  // Réponse vide / filtrée, erreur réseau, ou statut inconnu : ça vaut le coup de réessayer.
+  return true;
+}
+
+/** Appelle Gemini avec des tentatives espacées d'environ 1 minute en cas d'échec transitoire. */
+async function generateWithRetry(params, { onRetry } = {}) {
+  let lastErr;
+  for (let attempt = 1; attempt <= AI_MAX_ATTEMPTS; attempt++) {
+    try {
+      return await generateFollowUpAction(params);
+    } catch (err) {
+      lastErr = err;
+      if (!isRetryableAiError(err) || attempt === AI_MAX_ATTEMPTS) throw err;
+      if (onRetry) await onRetry(attempt, err).catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, AI_RETRY_DELAY_MS));
+    }
+  }
+  throw lastErr;
+}
+
 async function runAiTurn(ticket, category, { isAutoLoop = false } = {}) {
-  const { channel, recentMessages } = await fetchRecentMessagesForAi(ticket.channelId);
+  const { channel, recentMessages } = await fetchRecentMessagesForAi(ticket.channelId, ticket, category);
 
   if (isAutoLoop && ticket.aiTurnCount >= MAX_AI_AUTO_TURNS) {
     ticket.aiActive = false;
@@ -420,7 +493,7 @@ async function runAiTurn(ticket, category, { isAutoLoop = false } = {}) {
   ticket.aiTurnCount = (ticket.aiTurnCount || 0) + 1;
   await ticket.save();
 
-  const result = await generateFollowUpAction({
+  const result = await generateWithRetry({
     categoryName: category.name,
     categoryContext: category.aiContext,
     infoToCollect: category.aiInfoToCollect,
@@ -430,6 +503,14 @@ async function runAiTurn(ticket, category, { isAutoLoop = false } = {}) {
     recentMessages,
     permissions: category.aiPermissions,
     otherCategories,
+  }, {
+    onRetry: async (attempt, err) => {
+      if (channel) {
+        await channel.send(buildSimpleContainerMessage(
+          `🤖 Petit souci technique côté IA (${err.message}). Nouvelle tentative dans environ 1 minute... (essai ${attempt + 1}/${AI_MAX_ATTEMPTS})`
+        )).catch(() => {});
+      }
+    },
   });
 
   return applyAiResult(result, ticket, category, channel);
@@ -613,7 +694,7 @@ async function generateTranscript(channel, ticket, category) {
   const lines = sorted.map((m) => {
     const time = new Date(m.createdTimestamp).toLocaleString('fr-FR');
     const author = m.author?.tag || 'inconnu';
-    const content = m.content || '';
+    const content = extractMessageText(m) || '(message sans texte)';
     const files = [...m.attachments.values()].map((a) => `  [pièce jointe] ${a.name} — ${a.url}`).join('\n');
     return `[${time}] ${author} : ${content}${files ? '\n' + files : ''}`;
   });
