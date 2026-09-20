@@ -180,3 +180,9 @@ Autres améliorations liées :
 - Le dashboard (onglet Tickets, vue "Fermés") pointe désormais vers le **message du transcript** dans les logs plutôt que vers le salon du ticket — celui-ci est supprimé après fermeture, donc l'ancien lien ne menait plus nulle part.
 
 ⚠️ Les tickets déjà fermés *avant* ce correctif n'ont pas de transcript récupérable (le salon a été supprimé sans qu'il ait pu être archivé) — c'est propre à ces tickets-là, tout ticket fermé après le correctif sera correctement archivé.
+
+### Correctif : le fichier .txt n'apparaissait jamais (Components V2)
+
+**La vraie cause, trouvée** : en Components V2, un fichier passé dans `files:` n'est PAS affiché automatiquement — il faut un composant `File` dédié qui le référence explicitement via `attachment://nom-du-fichier`. Sans ça, le fichier est bien envoyé à Discord mais n'apparaît nulle part dans le message : exactement le symptôme observé (le message texte arrive, le .txt jamais). C'était le cas à trois endroits (transcript en logs, transcript de secours dans le salon du ticket, résumé IA) — corrigé partout.
+
+Aucune action nécessaire côté serveur cette fois, c'était un pur bug de code.

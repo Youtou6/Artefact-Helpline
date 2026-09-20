@@ -7,6 +7,7 @@ const {
   ButtonBuilder,
   ButtonStyle,
   StringSelectMenuBuilder,
+  FileBuilder,
   MessageFlags,
 } = require('discord.js');
 
@@ -41,6 +42,19 @@ function withActionRow(container, actionRow) {
 function buildSimpleContainerMessage(textOrLines, { ephemeral = false } = {}) {
   const lines = Array.isArray(textOrLines) ? textOrLines : [textOrLines];
   return { components: [buildTextContainer(lines)], flags: ephemeral ? CV2_EPHEMERAL_FLAGS : CV2_FLAGS };
+}
+
+/**
+ * Un container texte + un fichier joint, correctement RÉFÉRENCÉ par un composant
+ * File (obligatoire en Components V2 : sans ça, le fichier est bien uploadé mais
+ * n'apparaît nulle part dans le message). `filename` doit être EXACTEMENT le même
+ * nom que celui donné à l'AttachmentBuilder passé dans `files:` au moment de l'envoi.
+ */
+function buildFileMessage(textOrLines, filename, { ephemeral = false } = {}) {
+  const lines = Array.isArray(textOrLines) ? textOrLines : [textOrLines];
+  const container = buildTextContainer(lines);
+  container.addFileComponents(new FileBuilder().setURL(`attachment://${filename}`));
+  return { components: [container], flags: ephemeral ? CV2_EPHEMERAL_FLAGS : CV2_FLAGS };
 }
 
 // ─── Sélection de la langue ────────────────────────────────────────────────
@@ -307,6 +321,7 @@ module.exports = {
   CV2_EPHEMERAL_FLAGS,
   buildTextContainer,
   buildSimpleContainerMessage,
+  buildFileMessage,
   buildLanguageSelectMessage,
   buildCategorySelectMessage,
   buildQuestionMessage,

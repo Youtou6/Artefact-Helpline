@@ -140,6 +140,22 @@ router.put('/categories/:id', async (req, res) => {
     }
     const category = await Category.findByIdAndUpdate(req.params.id, update, { new: true });
     if (!category) return res.status(404).json({ error: 'not_found' });
+
+    // Si un rôle staff est défini, s'assure qu'il peut voir le salon de logs
+    // (sinon le staff ne verrait jamais les transcripts, même si le bot les poste bien).
+    if (category.staffRoleId) {
+      const settings = await Settings.getSingleton();
+      if (settings.guildId && settings.logChannelId) {
+        const guild = client.guilds.cache.get(settings.guildId);
+        const logChannel = guild ? await guild.channels.fetch(settings.logChannelId).catch(() => null) : null;
+        if (logChannel) {
+          await logChannel.permissionOverwrites.edit(category.staffRoleId, {
+            ViewChannel: true, ReadMessageHistory: true,
+          }).catch(() => {});
+        }
+      }
+    }
+
     res.json(category);
   } catch (err) {
     res.status(400).json({ error: err.message });

@@ -10,6 +10,7 @@ const {
   buildTicketPanel,
   buildTextContainer,
   buildSimpleContainerMessage,
+  buildFileMessage,
   buildCategoryRedirectSelect,
   buildClaimNotifyMessage,
   buildRedirectNotifyMessage,
@@ -362,11 +363,12 @@ async function sendAiSummaryFile(ticket, category, summaryText, channel) {
   ];
   const body = [...header, summaryText?.trim() || '(résumé vide)'].join('\n');
   const buffer = Buffer.from(body, 'utf-8');
+  const filename = `ia-resume-ticket-${ticket.ticketNumber}.txt`;
 
   await channel.send({
-    ...buildSimpleContainerMessage('🤖 L\'IA a terminé sa collecte d\'informations pour ce ticket. Résumé ci-joint :'),
-    files: [new AttachmentBuilder(buffer, { name: `ia-resume-ticket-${ticket.ticketNumber}.txt` })],
-  }).catch(() => {});
+    ...buildFileMessage('🤖 L\'IA a terminé sa collecte d\'informations pour ce ticket. Résumé ci-joint :', filename),
+    files: [new AttachmentBuilder(buffer, { name: filename })],
+  }).catch((err) => console.error(`[ai:summary] échec d'envoi du fichier récap pour le ticket #${ticket.ticketNumber} :`, err.message));
 }
 
 /** Notifie le salon qu'un humain doit prendre le relais (ping du rôle staff si défini). */
@@ -592,45 +594,69 @@ async function handleClose(interaction, ticketId, { reason = 'staff' } = {}) {
   const channel = await client.channels.fetch(ticket.channelId).catch(() => null);
   const settings = await Settings.getSingleton();
 
-  // Transcript .txt dans le salon des logs
-  let transcriptPosted = false;
-  if (channel) {
-    if (!settings.logChannelId) {
-      console.error(`[transcript] Ticket #${ticket.ticketNumber} : aucun logChannelId configuré (Settings.logChannelId est vide). Le salon ne sera pas supprimé.`);
-    } else {
-      const logChannel = await client.channels.fetch(settings.logChannelId).catch((err) => {
-        console.error(`[transcript] Ticket #${ticket.ticketNumber} : impossible de récupérer le salon de logs (${settings.logChannelId}) :`, err.message);
-        return null;
-      });
+  // Transcript .txt : toujours généré, et TOUJOURS posté quelque part — dans le
+  // salon de logs si possible, sinon directement dans le salon du ticket (dont
+  // les permissions sont par définition déjà bonnes, puisque le bot y discute
+  // depuis le début). Le transcript n'est donc plus jamais silencieusement absent.
+  let transcript;
+  try {
+    transcript = await generateTranscript(channel, ticket, category);
+  } catch (err) {
+    console.error(`[transcript] Ticket #${ticket.ticketNumber} : échec de génération :`, err.message);
+    transcript = Buffer.from(`Transcript indisponible (erreur de génération : ${err.message})`, 'utf-8');
+  }
 
-      if (!logChannel) {
-        console.error(`[transcript] Ticket #${ticket.ticketNumber} : salon de logs introuvable (supprimé sur Discord, ou ID obsolète après un changement de serveur). Re-clique sur "Initialiser sur ce serveur" dans le dashboard.`);
-      } else {
-        const transcript = await generateTranscript(channel, ticket, category);
-        const summary = buildTextContainer([
-          `**Ticket #${ticket.ticketNumber} fermé — ${category?.name || ticket.categoryKey}**`,
-          `👤 ${ticket.username} (\`${ticket.userId}\`)\n🌐 ${ticket.language.toUpperCase()}\n` +
-            `${ticket.claimedByTag ? `🙋 Pris en charge par ${ticket.claimedByTag}\n` : ''}` +
-            `🔒 Fermé par ${auto ? `fermeture automatique (${reason})` : (interaction?.member?.displayName || 'staff')}`,
-        ]);
-        try {
-          const logMessage = await logChannel.send({
-            components: [summary],
-            flags: CV2_FLAGS,
-            files: [new AttachmentBuilder(transcript, { name: `ticket-${ticket.ticketNumber}.txt` })],
-          });
-          ticket.transcriptUrl = `https://discord.com/channels/${channel.guild.id}/${logChannel.id}/${logMessage.id}`;
-          transcriptPosted = true;
-        } catch (err) {
-          console.error(
-            `[transcript] Ticket #${ticket.ticketNumber} : échec de l'envoi dans le salon de logs — ` +
-            `très probablement un problème de permissions du bot sur ce salon. Re-clique sur ` +
-            `"Initialiser sur ce serveur" dans le dashboard pour les réparer. Détail :`, err.message
-          );
-        }
+  const summaryLines = [
+    `**Ticket #${ticket.ticketNumber} fermé — ${category?.name || ticket.categoryKey}**`,
+    `👤 ${ticket.username} (\`${ticket.userId}\`)\n🌐 ${ticket.language.toUpperCase()}\n` +
+      `${ticket.claimedByTag ? `🙋 Pris en charge par ${ticket.claimedByTag}\n` : ''}` +
+      `🔒 Fermé par ${auto ? `fermeture automatique (${reason})` : (interaction?.member?.displayName || 'staff')}`,
+  ];
+  const transcriptFilename = `ticket-${ticket.ticketNumber}.txt`;
+  const transcriptFile = () => new AttachmentBuilder(transcript, { name: transcriptFilename });
+
+  let transcriptPosted = false;
+
+  if (settings.logChannelId) {
+    const logChannel = await client.channels.fetch(settings.logChannelId).catch((err) => {
+      console.error(`[transcript] Ticket #${ticket.ticketNumber} : salon de logs introuvable (${settings.logChannelId}) :`, err.message);
+      return null;
+    });
+    if (logChannel) {
+      try {
+        const logMessage = await logChannel.send({
+          ...buildFileMessage(summaryLines, transcriptFilename),
+          files: [transcriptFile()],
+        });
+        ticket.transcriptUrl = `https://discord.com/channels/${logChannel.guild.id}/${logChannel.id}/${logMessage.id}`;
+        transcriptPosted = true;
+      } catch (err) {
+        console.error(`[transcript] Ticket #${ticket.ticketNumber} : échec d'envoi dans le salon de logs (permissions ?) :`, err.message);
       }
     }
+  } else {
+    console.error(`[transcript] Ticket #${ticket.ticketNumber} : aucun logChannelId configuré.`);
   }
+
+  // Filet de sécurité : si les logs n'ont pas marché, le transcript part quand
+  // même — directement dans le salon du ticket, avant de décider de le garder.
+  if (!transcriptPosted && channel) {
+    try {
+      const fallbackMessage = await channel.send({
+        ...buildFileMessage(
+          '⚠️ Le salon de logs n\'a pas pu recevoir ce transcript (vérifie la config dans le dashboard). Il est donc archivé ici, dans ce salon, qui ne sera pas supprimé.',
+          transcriptFilename
+        ),
+        files: [transcriptFile()],
+      });
+      ticket.transcriptUrl = `https://discord.com/channels/${channel.guild.id}/${channel.id}/${fallbackMessage.id}`;
+      transcriptPosted = true; // posté quelque part, donc pas perdu — mais on ne supprimera pas ce salon (voir plus bas)
+    } catch (err) {
+      console.error(`[transcript] Ticket #${ticket.ticketNumber} : échec même dans le salon du ticket (cas très inhabituel) :`, err.message);
+    }
+  }
+
+  const keptAsFallback = transcriptPosted && !ticket.transcriptUrl?.includes(`/${settings.logChannelId}/`);
 
   // DM de fermeture + contexte
   const user = await client.users.fetch(ticket.userId).catch(() => null);
@@ -653,19 +679,15 @@ async function handleClose(interaction, ticketId, { reason = 'staff' } = {}) {
   }
 
   if (channel) {
-    if (transcriptPosted) {
+    if (transcriptPosted && !keptAsFallback) {
       setTimeout(() => channel.delete().catch(() => {}), 3000);
-    } else {
-      // On ne perd jamais la conversation en silence : si le transcript n'a pas pu être
-      // archivé, le salon reste en place (juste renommé) jusqu'à ce que ce soit corrigé.
-      await channel.send(buildSimpleContainerMessage(
-        '⚠️ Ce ticket est fermé côté utilisateur, mais le transcript n\'a pas pu être envoyé dans le salon ' +
-        'de logs (permissions ou configuration à vérifier). Ce salon n\'a donc PAS été supprimé automatiquement, ' +
-        'pour ne pas perdre la conversation. Vérifie la configuration dans le dashboard (Paramètres → ' +
-        '"Initialiser sur ce serveur"), puis supprime ce salon manuellement une fois le transcript récupéré.'
-      )).catch(() => {});
+    } else if (!transcriptPosted) {
+      // Cas extrême : même le filet de sécurité a échoué. On ne supprime jamais
+      // un salon dont on n'a réussi à archiver le contenu nulle part.
       await channel.setName(`⚠️-${channel.name}`.slice(0, 90)).catch(() => {});
     }
+    // Si keptAsFallback : le transcript est déjà visible juste au-dessus dans ce
+    // même salon, donc on le laisse tel quel (pas de renommage, pas d'alarme).
   }
 }
 

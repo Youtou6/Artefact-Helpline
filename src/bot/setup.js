@@ -1,12 +1,9 @@
 const { ChannelType, PermissionFlagsBits } = require('discord.js');
 const client = require('./client');
 const Settings = require('../models/Settings');
+const Category = require('../models/Category');
 const { registerGuildCommands } = require('./cannedMenu');
 
-// Permissions dont le bot a besoin sur la catégorie de tickets ET le salon de logs.
-// Sans ça, si le rôle du bot n'a pas ces droits au niveau du serveur, tous ses envois
-// dans ces salons échouent silencieusement (c'était le bug : le salon de logs ne
-// recevait jamais rien car seul @everyone était explicitement géré, pas le bot).
 const BOT_CHANNEL_PERMISSIONS = [
   PermissionFlagsBits.ViewChannel,
   PermissionFlagsBits.SendMessages,
@@ -15,13 +12,17 @@ const BOT_CHANNEL_PERMISSIONS = [
   PermissionFlagsBits.ManageChannels,
 ];
 
+const STAFF_LOG_VIEW_PERMISSIONS = [
+  PermissionFlagsBits.ViewChannel,
+  PermissionFlagsBits.ReadMessageHistory,
+];
+
 /**
  * Crée la catégorie de tickets et le salon de logs sur le serveur configuré, et
- * enregistre les commandes slash. Idempotent : si les salons existent déjà (ID
- * stockés en base et toujours présents sur le serveur), ne recrée rien — se
- * contente de réparer les permissions du bot dessus. C'est ce qui permet de
- * "réparer" une installation existante en re-cliquant simplement sur le bouton
- * "Initialiser sur ce serveur" du dashboard, sans rien dupliquer.
+ * enregistre les commandes slash. Idempotent : si les salons existent déjà, ne
+ * recrée rien — répare juste les permissions dessus (bot + rôles staff). C'est ce
+ * qui permet de "réparer" une installation existante en re-cliquant simplement
+ * sur "Initialiser sur ce serveur" dans le dashboard.
  */
 async function initializeGuild(guildId) {
   const guild = client.guilds.cache.get(guildId);
@@ -34,6 +35,12 @@ async function initializeGuild(guildId) {
 
   const settings = await Settings.getSingleton();
   const sameGuild = settings.guildId === guildId;
+
+  // Tous les rôles staff configurés sur les catégories : ils doivent pouvoir VOIR
+  // le salon de logs (jusqu'ici, seul le bot le pouvait — c'était le bug : le staff
+  // ne voyait littéralement pas ce salon, même quand le bot y postait bien).
+  const categories = await Category.find({ staffRoleId: { $ne: null } }).select('staffRoleId');
+  const staffRoleIds = [...new Set(categories.map((c) => c.staffRoleId).filter(Boolean))];
 
   let category = sameGuild && settings.ticketCategoryId
     ? await guild.channels.fetch(settings.ticketCategoryId).catch(() => null)
@@ -66,12 +73,18 @@ async function initializeGuild(guildId) {
       permissionOverwrites: [
         { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
         { id: client.user.id, allow: BOT_CHANNEL_PERMISSIONS },
+        ...staffRoleIds.map((roleId) => ({ id: roleId, allow: STAFF_LOG_VIEW_PERMISSIONS })),
       ],
     });
   } else {
     await logChannel.permissionOverwrites.edit(client.user.id, {
       ViewChannel: true, SendMessages: true, AttachFiles: true, EmbedLinks: true,
     }).catch(() => {});
+    for (const roleId of staffRoleIds) {
+      await logChannel.permissionOverwrites.edit(roleId, {
+        ViewChannel: true, ReadMessageHistory: true,
+      }).catch(() => {});
+    }
   }
 
   await registerGuildCommands(guild);
@@ -82,7 +95,7 @@ async function initializeGuild(guildId) {
   settings.initialized = true;
   await settings.save();
 
-  return { ticketCategoryId: category.id, logChannelId: logChannel.id, guildName: guild.name };
+  return { ticketCategoryId: category.id, logChannelId: logChannel.id, guildName: guild.name, staffRolesGranted: staffRoleIds.length };
 }
 
 module.exports = { initializeGuild };
