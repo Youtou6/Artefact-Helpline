@@ -31,6 +31,10 @@ const TicketSchema = new Schema({
   closedBy: { type: String, default: null },
   closeReason: { type: String, default: null }, // 'staff' | 'inactivity' | 'auto'
 
+  // Lien Discord direct vers le message du transcript dans le salon de logs
+  // (utilisé par le dashboard puisque le salon du ticket, lui, est supprimé).
+  transcriptUrl: { type: String, default: null },
+
   // Suivi de l'inactivité en 2 temps. Remis à null dès qu'il y a une nouvelle activité.
   inactivityWarnedAt: { type: Date, default: null },
 

@@ -593,21 +593,42 @@ async function handleClose(interaction, ticketId, { reason = 'staff' } = {}) {
   const settings = await Settings.getSingleton();
 
   // Transcript .txt dans le salon des logs
-  if (channel && settings.logChannelId) {
-    const transcript = await generateTranscript(channel, ticket, category);
-    const logChannel = await client.channels.fetch(settings.logChannelId).catch(() => null);
-    if (logChannel) {
-      const summary = buildTextContainer([
-        `**Ticket #${ticket.ticketNumber} fermé — ${category?.name || ticket.categoryKey}**`,
-        `👤 ${ticket.username} (\`${ticket.userId}\`)\n🌐 ${ticket.language.toUpperCase()}\n` +
-          `${ticket.claimedByTag ? `🙋 Pris en charge par ${ticket.claimedByTag}\n` : ''}` +
-          `🔒 Fermé par ${auto ? `fermeture automatique (${reason})` : (interaction?.member?.displayName || 'staff')}`,
-      ]);
-      await logChannel.send({
-        components: [summary],
-        flags: CV2_FLAGS,
-        files: [new AttachmentBuilder(transcript, { name: `ticket-${ticket.ticketNumber}.txt` })],
-      }).catch(() => {});
+  let transcriptPosted = false;
+  if (channel) {
+    if (!settings.logChannelId) {
+      console.error(`[transcript] Ticket #${ticket.ticketNumber} : aucun logChannelId configuré (Settings.logChannelId est vide). Le salon ne sera pas supprimé.`);
+    } else {
+      const logChannel = await client.channels.fetch(settings.logChannelId).catch((err) => {
+        console.error(`[transcript] Ticket #${ticket.ticketNumber} : impossible de récupérer le salon de logs (${settings.logChannelId}) :`, err.message);
+        return null;
+      });
+
+      if (!logChannel) {
+        console.error(`[transcript] Ticket #${ticket.ticketNumber} : salon de logs introuvable (supprimé sur Discord, ou ID obsolète après un changement de serveur). Re-clique sur "Initialiser sur ce serveur" dans le dashboard.`);
+      } else {
+        const transcript = await generateTranscript(channel, ticket, category);
+        const summary = buildTextContainer([
+          `**Ticket #${ticket.ticketNumber} fermé — ${category?.name || ticket.categoryKey}**`,
+          `👤 ${ticket.username} (\`${ticket.userId}\`)\n🌐 ${ticket.language.toUpperCase()}\n` +
+            `${ticket.claimedByTag ? `🙋 Pris en charge par ${ticket.claimedByTag}\n` : ''}` +
+            `🔒 Fermé par ${auto ? `fermeture automatique (${reason})` : (interaction?.member?.displayName || 'staff')}`,
+        ]);
+        try {
+          const logMessage = await logChannel.send({
+            components: [summary],
+            flags: CV2_FLAGS,
+            files: [new AttachmentBuilder(transcript, { name: `ticket-${ticket.ticketNumber}.txt` })],
+          });
+          ticket.transcriptUrl = `https://discord.com/channels/${channel.guild.id}/${logChannel.id}/${logMessage.id}`;
+          transcriptPosted = true;
+        } catch (err) {
+          console.error(
+            `[transcript] Ticket #${ticket.ticketNumber} : échec de l'envoi dans le salon de logs — ` +
+            `très probablement un problème de permissions du bot sur ce salon. Re-clique sur ` +
+            `"Initialiser sur ce serveur" dans le dashboard pour les réparer. Détail :`, err.message
+          );
+        }
+      }
     }
   }
 
@@ -632,7 +653,19 @@ async function handleClose(interaction, ticketId, { reason = 'staff' } = {}) {
   }
 
   if (channel) {
-    setTimeout(() => channel.delete().catch(() => {}), 3000);
+    if (transcriptPosted) {
+      setTimeout(() => channel.delete().catch(() => {}), 3000);
+    } else {
+      // On ne perd jamais la conversation en silence : si le transcript n'a pas pu être
+      // archivé, le salon reste en place (juste renommé) jusqu'à ce que ce soit corrigé.
+      await channel.send(buildSimpleContainerMessage(
+        '⚠️ Ce ticket est fermé côté utilisateur, mais le transcript n\'a pas pu être envoyé dans le salon ' +
+        'de logs (permissions ou configuration à vérifier). Ce salon n\'a donc PAS été supprimé automatiquement, ' +
+        'pour ne pas perdre la conversation. Vérifie la configuration dans le dashboard (Paramètres → ' +
+        '"Initialiser sur ce serveur"), puis supprime ce salon manuellement une fois le transcript récupéré.'
+      )).catch(() => {});
+      await channel.setName(`⚠️-${channel.name}`.slice(0, 90)).catch(() => {});
+    }
   }
 }
 

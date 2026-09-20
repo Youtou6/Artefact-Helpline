@@ -508,7 +508,10 @@ async function loadTickets(status) {
 
   const guildId = currentSettings?.guildId;
   el.innerHTML = '<div class="panel">' + tickets.map((t) => {
-    const link = guildId ? `https://discord.com/channels/${guildId}/${t.channelId}` : null;
+    const link = status === 'closed'
+      ? t.transcriptUrl // le salon est supprimé une fois fermé ; seul le transcript en logs reste consultable
+      : (guildId ? `https://discord.com/channels/${guildId}/${t.channelId}` : null);
+    const linkLabel = status === 'closed' ? 'Voir le transcript' : 'Voir le salon';
     const ratingBadge = t.rating ? `<span class="badge ok">${'⭐'.repeat(t.rating)}</span>` : (status === 'closed' ? '<span class="badge">Pas de note</span>' : '');
     const sub = status === 'closed'
       ? `${t.language.toUpperCase()} · fermé ${fmtDate(t.closedAt)} · ${t.closeReason === 'inactivity' ? 'inactivité' : 'staff'}`
@@ -519,7 +522,7 @@ async function loadTickets(status) {
         <div class="row-title">#${t.ticketNumber} — ${escapeHtml(t.categoryId?.emoji || '')} ${escapeHtml(t.categoryId?.name || t.categoryKey)} — ${escapeHtml(t.username)} ${ratingBadge}</div>
         <div class="row-sub">${sub}</div>
       </div>
-      <div class="row-actions">${link ? `<a class="btn small" href="${link}" target="_blank">Voir le salon</a>` : ''}</div>
+      <div class="row-actions">${link ? `<a class="btn small" href="${link}" target="_blank">${linkLabel}</a>` : (status === 'closed' ? '<span class="hint">Transcript indisponible</span>' : '')}</div>
     </div>`;
   }).join('') + '</div>';
 }

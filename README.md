@@ -167,3 +167,16 @@ En cas de souci de déploiement, vérifie en premier les logs Render (onglet **L
 - **Nouvelles tentatives automatiques** : si Gemini échoue de façon transitoire (réponse vide/filtrée, erreur 429/5xx, souci réseau), le bot réessaie automatiquement jusqu'à 2 fois, à environ 1 minute d'intervalle, avec une petite note dans le salon à chaque tentative. Ce n'est qu'après ces essais qu'il bascule sur "un humain est nécessaire". Les erreurs de configuration (clé manquante, modèle introuvable...) ne sont en revanche jamais réessayées, puisque réessayer ne changerait rien.
 - **Transcript complet** : le fichier `.txt` généré à la fermeture capture désormais aussi le texte des messages du bot envoyés en Components V2 (panneau, notices IA, redirections...), qui étaient auparavant invisibles dans le transcript.
 - **Confidentialité vis-à-vis de Google** : le contexte envoyé à Gemini est filtré pour ne contenir QUE ce qui concerne l'utilisateur qui contacte — ses réponses au formulaire, ses propres messages, et les réponses du staff qui lui ont réellement été envoyées (anonymisées si l'option "réponses anonymes" est active pour la catégorie). Le panneau du ticket, les notices internes (redirection, rappel, pings de rôle...) et tout ce qui n'est pas explicitement adressé au client ne partent jamais vers l'API Gemini.
+
+### Correctif important : permissions du bot sur le salon de logs
+
+**Bug trouvé et corrigé** : à la création automatique de la catégorie et du salon de logs, seul le rôle `@everyone` était explicitement géré (accès refusé) — le bot lui-même n'avait aucune permission explicite dessus. Si son rôle Discord n'avait pas déjà les droits nécessaires au niveau du serveur, tous ses envois dans le salon de logs échouaient silencieusement : aucun transcript n'apparaissait, sans aucune erreur visible.
+
+C'est corrigé, et **une action est nécessaire après ce déploiement** : va dans le dashboard → **Paramètres** → reclique sur **"Initialiser sur ce serveur"**. Le bouton est maintenant idempotent : il ne recrée rien s'ils existent déjà, il répare juste les permissions du bot sur la catégorie et le salon de logs existants.
+
+Autres améliorations liées :
+- Si l'envoi du transcript échoue malgré tout (permissions encore mauvaises, salon de logs supprimé...), **le salon du ticket n'est plus supprimé automatiquement** — il est renommé avec un préfixe ⚠️ et un message explique le problème, pour ne jamais perdre une conversation en silence.
+- Les vraies erreurs sont maintenant loguées côté serveur (visible dans les logs Render) au lieu d'être avalées silencieusement.
+- Le dashboard (onglet Tickets, vue "Fermés") pointe désormais vers le **message du transcript** dans les logs plutôt que vers le salon du ticket — celui-ci est supprimé après fermeture, donc l'ancien lien ne menait plus nulle part.
+
+⚠️ Les tickets déjà fermés *avant* ce correctif n'ont pas de transcript récupérable (le salon a été supprimé sans qu'il ait pu être archivé) — c'est propre à ces tickets-là, tout ticket fermé après le correctif sera correctement archivé.
