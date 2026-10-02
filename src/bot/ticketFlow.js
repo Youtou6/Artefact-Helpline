@@ -11,6 +11,7 @@ const {
   buildSimpleContainerMessage,
   buildLanguageSelectMessage,
   buildCategorySelectMessage,
+  buildCategoryFullMessage,
   buildQuestionMessage,
   buildTicketCreatedMessage,
   buildTicketPanel,
@@ -52,6 +53,13 @@ function sanitizeForChannelName(str) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 20) || 'user';
+}
+
+/** true si la catégorie a déjà atteint son nombre max de tickets ouverts (0 = illimité). */
+async function isCategoryFull(category) {
+  if (!category.maxOpenTickets) return false;
+  const openCount = await Ticket.countDocuments({ categoryId: category._id, status: 'open' });
+  return openCount >= category.maxOpenTickets;
 }
 
 function buildChannelName(format, username, count, categoryKey) {
@@ -160,6 +168,12 @@ async function handleCategorySelect(interaction) {
   const category = await Category.findById(categoryId);
   if (!category || !category.active) {
     await interaction.reply(buildSimpleContainerMessage('This category is no longer available.')).catch(() => {});
+    flowState.clearFlow(userId);
+    return;
+  }
+
+  if (await isCategoryFull(category)) {
+    await interaction.update(buildCategoryFullMessage(flow.language, category.maxOpenTickets)).catch(() => {});
     flowState.clearFlow(userId);
     return;
   }
@@ -282,9 +296,9 @@ async function finalizeTicket(user, flow, interaction = null) {
   const settings = await Settings.getSingleton();
 
   if (!settings.guildId || !settings.initialized || !settings.ticketCategoryId) {
-    const errText = 'The support system is not fully configured yet. Please contact an administrator.';
-    if (interaction) await interaction.update({ content: errText, components: [] }).catch(() => {});
-    else await (await user.createDM()).send(errText).catch(() => {});
+    const errPayload = buildSimpleContainerMessage('The support system is not fully configured yet. Please contact an administrator.');
+    if (interaction) await interaction.update(errPayload).catch(() => {});
+    else await (await user.createDM()).send(errPayload).catch(() => {});
     flowState.clearFlow(user.id);
     return;
   }
@@ -296,6 +310,17 @@ async function finalizeTicket(user, flow, interaction = null) {
   }
 
   const category = await Category.findById(flow.categoryId);
+
+  // Re-vérification juste avant la création (sécurité anti-course : la catégorie
+  // a pu se remplir entre le choix de catégorie et la fin du formulaire).
+  if (await isCategoryFull(category)) {
+    const fullPayload = buildCategoryFullMessage(flow.language, category.maxOpenTickets);
+    if (interaction) await interaction.update(fullPayload).catch(() => {});
+    else await (await user.createDM()).send(fullPayload).catch(() => {});
+    flowState.clearFlow(user.id);
+    return;
+  }
+
   const seq = await Counter.next(category.key);
   const channelName = buildChannelName(category.ticketNameFormat, user.username, seq, category.key);
 
