@@ -36,6 +36,10 @@ const CategorySchema = new Schema({
 
   anonymousReplies: { type: Boolean, default: false },
 
+  // Nombre max de tickets OUVERTS simultanément dans cette catégorie. 0 = illimité.
+  // Au-delà, un nouvel utilisateur ne peut pas ouvrir de ticket dans cette catégorie.
+  maxOpenTickets: { type: Number, default: 0 },
+
   // Inactivité en 2 temps. 0 = étape désactivée.
   inactivityWarningMinutes: { type: Number, default: 0 },
   inactivityCloseMinutes: { type: Number, default: 0 },
