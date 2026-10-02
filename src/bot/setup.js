@@ -39,8 +39,20 @@ async function initializeGuild(guildId) {
   // Tous les rôles staff configurés sur les catégories : ils doivent pouvoir VOIR
   // le salon de logs (jusqu'ici, seul le bot le pouvait — c'était le bug : le staff
   // ne voyait littéralement pas ce salon, même quand le bot y postait bien).
+  // On ne garde que les rôles qui existent VRAIMENT sur ce serveur précis : un
+  // rôle configuré avant un changement de serveur (test -> prod) n'existe plus
+  // ici, et Discord.js plante ("Supplied parameter is not a cached User or Role")
+  // si on essaie de lui donner une permission.
   const categories = await Category.find({ staffRoleId: { $ne: null } }).select('staffRoleId');
-  const staffRoleIds = [...new Set(categories.map((c) => c.staffRoleId).filter(Boolean))];
+  const allStaffRoleIds = [...new Set(categories.map((c) => c.staffRoleId).filter(Boolean))];
+  const staffRoleIds = allStaffRoleIds.filter((roleId) => guild.roles.cache.has(roleId));
+  const skippedRoleIds = allStaffRoleIds.filter((roleId) => !guild.roles.cache.has(roleId));
+  if (skippedRoleIds.length) {
+    console.warn(
+      `[setup] ${skippedRoleIds.length} rôle(s) staff ignoré(s) car introuvable(s) sur ce serveur ` +
+      `(probablement configurés pour un autre serveur) : ${skippedRoleIds.join(', ')}`
+    );
+  }
 
   let category = sameGuild && settings.ticketCategoryId
     ? await guild.channels.fetch(settings.ticketCategoryId).catch(() => null)
