@@ -141,8 +141,10 @@ document.getElementById('saveGuildBtn').addEventListener('click', async () => {
 document.getElementById('initGuildBtn').addEventListener('click', async () => {
   if (!confirm('Créer (ou recréer) la catégorie de tickets et le salon de logs sur le serveur sélectionné ?')) return;
   try {
-    await api('/api/settings/initialize', { method: 'POST' });
-    toast('Serveur initialisé avec succès.');
+    const result = await api('/api/settings/initialize', { method: 'POST' });
+    toast(result.staffRolesSkipped
+      ? `Serveur initialisé, mais ${result.staffRolesSkipped} rôle(s) staff ignoré(s) (introuvable(s) sur ce serveur — re-sélectionne-les dans tes catégories).`
+      : 'Serveur initialisé avec succès.');
     loadSettings();
   } catch (err) {
     toast(err.message, true);
@@ -238,10 +240,17 @@ function renderCategories(roles) {
       </div>
       <div class="hint" style="margin-top:-8px; margin-bottom:14px;">Variables : <code>{key}</code> <code>{user}</code> <code>{count}</code></div>
 
-      <div class="checkbox-row field">
-        <input type="checkbox" data-field="anonymousReplies" ${cat.anonymousReplies ? 'checked' : ''} />
-        <label style="margin:0;">Réponses staff anonymes</label>
+      <div class="field-row">
+        <div class="checkbox-row field">
+          <input type="checkbox" data-field="anonymousReplies" ${cat.anonymousReplies ? 'checked' : ''} />
+          <label style="margin:0;">Réponses staff anonymes</label>
+        </div>
+        <div class="field">
+          <label>Tickets ouverts max en simultané (0 = illimité)</label>
+          <input type="number" min="0" data-field="maxOpenTickets" value="${cat.maxOpenTickets ?? 0}" />
+        </div>
       </div>
+      <div class="hint" style="margin-top:-8px; margin-bottom:14px;">Au-delà de cette limite, un nouvel utilisateur ne pourra pas ouvrir de ticket dans cette catégorie (message clair affiché à la place).</div>
 
       <div class="field-row">
         <div class="field">
@@ -360,6 +369,7 @@ document.getElementById('categoriesList').addEventListener('click', async (e) =>
       staffRoleId: get('staffRoleId').value || null,
       ticketNameFormat: get('ticketNameFormat').value.trim() || '{key}-{count}',
       anonymousReplies: get('anonymousReplies').checked,
+      maxOpenTickets: Number(get('maxOpenTickets').value) || 0,
       inactivityWarningMinutes: Number(get('inactivityWarningMinutes').value) || 0,
       inactivityCloseMinutes: Number(get('inactivityCloseMinutes').value) || 0,
       aiContext: get('aiContext').value.trim(),
