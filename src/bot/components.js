@@ -128,6 +128,17 @@ function buildQuestionMessage({ text, stepLabel, lang, type = 'text', options = 
   return { components: [container], flags: CV2_FLAGS };
 }
 
+// ─── Catégorie complète (limite de tickets ouverts atteinte) ──────────────
+const CATEGORY_FULL_TEXT = {
+  en: (max) => `Sorry, this category is currently at full capacity (max ${max} open ticket${max > 1 ? 's' : ''} at a time). Please try again later.`,
+  fr: (max) => `Désolé, cette catégorie est actuellement complète (maximum ${max} ticket${max > 1 ? 's' : ''} ouvert${max > 1 ? 's' : ''} en même temps). Merci de réessayer plus tard.`,
+  de: (max) => `Entschuldigung, diese Kategorie ist derzeit voll ausgelastet (maximal ${max} offene${max > 1 ? '' : 's'} Ticket${max > 1 ? 's' : ''} gleichzeitig). Bitte versuchen Sie es später erneut.`,
+};
+function buildCategoryFullMessage(lang, max) {
+  const text = (CATEGORY_FULL_TEXT[lang] || CATEGORY_FULL_TEXT.en)(max);
+  return buildSimpleContainerMessage(text);
+}
+
 // ─── Confirmation de création de ticket (en DM) ────────────────────────────
 const TICKET_CREATED_TEXT = {
   en: (n, cat) => `✅ Your ticket **#${n}** (${cat}) has been created. Our team has been notified and will reply here shortly. You'll be kept updated in this DM as things happen (claimed, moved, closed...).`,
@@ -324,6 +335,7 @@ module.exports = {
   buildFileMessage,
   buildLanguageSelectMessage,
   buildCategorySelectMessage,
+  buildCategoryFullMessage,
   buildQuestionMessage,
   buildTicketCreatedMessage,
   buildTicketPanel,
