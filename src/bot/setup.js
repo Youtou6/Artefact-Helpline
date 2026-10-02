@@ -107,7 +107,13 @@ async function initializeGuild(guildId) {
   settings.initialized = true;
   await settings.save();
 
-  return { ticketCategoryId: category.id, logChannelId: logChannel.id, guildName: guild.name, staffRolesGranted: staffRoleIds.length };
+  return {
+    ticketCategoryId: category.id,
+    logChannelId: logChannel.id,
+    guildName: guild.name,
+    staffRolesGranted: staffRoleIds.length,
+    staffRolesSkipped: skippedRoleIds.length,
+  };
 }
 
 module.exports = { initializeGuild };
